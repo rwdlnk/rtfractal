@@ -61,7 +61,7 @@ def test_covering_offsets_recover_koch_dimension():
 
 def test_legacy_offsets_bias_high():
     segs = koch(7)
-    leg = scaling.dimension_2d(*box_counting_2d(segs, 2 * 0.4 / 640, 0.2, 1.5, 'cpu')[:2])['dimension']
+    leg = scaling.dimension_2d(*box_counting_2d(segs, 2 * 0.4 / 640, 0.2, 1.5, 'cpu', offsets='legacy')[:2])['dimension']
     cov = scaling.dimension_2d(*box_counting_2d(segs, 2 * 0.4 / 640, 0.2, 1.5, 'cpu', offsets='covering')[:2])['dimension']
     assert leg > cov + 0.1
 
@@ -93,7 +93,7 @@ def test_legacy_offsets_lose_flat_surface():
     """A perfectly flat surface lies below every shifted legacy origin."""
     m = plane_mesh()
     with pytest.raises(ValueError):
-        box_counting_3d(m, initial=0.1, num_steps=8, min_delta=0.004, backend='cpu')
+        box_counting_3d(m, initial=0.1, num_steps=8, min_delta=0.004, backend='cpu', offsets='legacy')
 
 
 @needs_cuda

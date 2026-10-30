@@ -31,11 +31,13 @@ rtfractal analyze CASE --backend cpu        # or cuda; default auto (also $RTFRA
 rtfractal analyze CASE --output-dir OUT     # default CASE/analysis
 rtfractal analyze CASE --contour-levels 0.1,0.5,0.9     # 2D
 rtfractal analyze CASE --skip-energy                     # 3D: don't read U
-rtfractal analyze CASE --offsets covering                # see "Known issues"
+rtfractal analyze CASE --offsets legacy                  # reproduce FractalParameterAI numbers
 ```
 
 The output layout and the columns of `analysis/summary/temporal_results.csv`
-match the legacy analyzers.
+match the legacy analyzers. The numbers differ by default: rtfractal uses
+covering grid-origin offsets (see "Known issues", item 1). Pass
+`--offsets legacy` to reproduce the legacy analyzers bit for bit.
 
 From Python:
 ```python
@@ -75,10 +77,11 @@ side by side.
 
 ## Known issues inherited from the legacy algorithm
 
-They're reproduced on purpose so results match. Both need a decision before
-they're changed.
+Item 1 is fixed by default (decided 2026-10-30); the others are still
+reproduced on purpose so results match.
 
 1. **Grid-origin offsets don't cover the set** (`boxcount/offsets.py`, `--offsets`).
+   **Fixed: the default is now `covering`; `legacy` reproduces the old behaviour.**
    - **What happens:** at each box size the grid origin is moved to
      `min + f·δ` (f = 0 … 0.75), and the minimum count over origins is kept.
      Parts of the interface in `[min, min + f·δ)` are never counted, so
@@ -93,6 +96,11 @@ they're changed.
      1.647, and LBM 160×200 from 1.648 to 1.534.
    - **3D:** a nearly flat early-time surface lies entirely below every
      shifted origin, which gives zero counts.
+   - **Production study** (all 2D/3D Dalziel cases, mean D over τ > 2;
+     `RT-Simulations/Dalziel_1999/offset_study/SUMMARY.md`): with covering
+     offsets 2D D at 1920×2400 is about 1.69 (max box L/2) or 1.71 (L/8),
+     against 1.76 legacy; 3D D is about 2.61 against 2.76. D3D − D2D stays
+     close to +1 (+0.94 against +0.98).
 2. **The 2D boundary-removal test compares r, not R², against 0.95**
    (`boxcount/scaling.py`). In 2D r ≈ −1, so the test always trims the first
    and last box size whenever the ladder has more than 8 sizes. In 3D r ≈ +1,

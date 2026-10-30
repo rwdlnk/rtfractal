@@ -35,8 +35,8 @@ def main(argv=None):
     a.add_argument('--backend', choices=['auto', 'cpu', 'cuda'], default=None,
                    help='box-counting backend (default auto, or $RTFRACTAL_BACKEND)')
     a.add_argument('--contour-levels', default='0.5', help='2D: comma-separated levels for D')
-    a.add_argument('--offsets', choices=['legacy', 'covering'], default='legacy',
-                   help='grid-origin offsets: legacy (reproduces FractalParameterAI; biased high) or covering')
+    a.add_argument('--offsets', choices=['legacy', 'covering'], default='covering',
+                   help='grid-origin offsets: covering (default) or legacy (reproduces FractalParameterAI; biased high)')
     a.add_argument('--skip-energy', action='store_true', help='3D: skip the PE/BPE/KE budget (no U read)')
     a.set_defaults(func=_analyze)
     args = p.parse_args(argv)

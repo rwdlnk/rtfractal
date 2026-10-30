@@ -28,8 +28,8 @@ def origin(lo, frac, box, mode):
               part of the set in [lo, lo + frac*box) is never counted and the
               minimum over offsets undercounts.  This inflates D (Koch curve:
               1.35-1.39 instead of 1.26 with FractalAnalyzer's own generator).
-              Kept as the default only so legacy results reproduce exactly.
-    covering: lo - frac*box -- every grid covers the whole set.
+              Kept only so legacy results reproduce exactly.
+    covering: lo - frac*box -- every grid covers the whole set (default).
     """
     if mode == 'legacy':
         return lo + frac * box

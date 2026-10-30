@@ -210,7 +210,7 @@ def delta_ladder(initial, factor, num_steps, min_delta, max_delta):
 
 
 def box_counting_3d(mesh, initial, factor=1.5, num_steps=20, min_delta=None, max_delta=None,
-                    backend=None, log=None, offsets='legacy'):
+                    backend=None, log=None, offsets='covering'):
     """-> (deltas, counts) with zero counts removed."""
     bb = mesh.bbox
     char = bb.characteristic_length

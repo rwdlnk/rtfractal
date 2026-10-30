@@ -159,7 +159,7 @@ class SegmentCounter:
 MARGIN_FACTOR = 0.01
 
 
-def box_counting_2d(segs, min_box, max_box, factor=1.5, backend=None, offsets='legacy'):
+def box_counting_2d(segs, min_box, max_box, factor=1.5, backend=None, offsets='covering'):
     """Grid-optimised box counting -> (box_sizes, box_counts, bbox).
 
     Sizes with zero occupied boxes are skipped (legacy behaviour)."""

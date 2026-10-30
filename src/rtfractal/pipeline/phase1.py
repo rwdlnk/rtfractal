@@ -28,7 +28,7 @@ def _dirs(analysis_dir, names):
         os.makedirs(os.path.join(analysis_dir, n), exist_ok=True)
 
 
-def run_2d(case, analysis_dir, contour_levels=(0.5,), backend=None, log=print, offsets='legacy'):
+def run_2d(case, analysis_dir, contour_levels=(0.5,), backend=None, log=print, offsets='covering'):
     contour_levels = sorted(set(contour_levels))
     _dirs(analysis_dir, ['interfaces', 'fractal', 'summary', 'profiles'])
     phys, H, H0 = case.physics, case.physics.H, case.H0
@@ -114,7 +114,7 @@ def run_2d(case, analysis_dir, contour_levels=(0.5,), backend=None, log=print, o
     return df
 
 
-def run_3d(case, analysis_dir, energy=True, backend=None, log=print, offsets='legacy'):
+def run_3d(case, analysis_dir, energy=True, backend=None, log=print, offsets='covering'):
     _dirs(analysis_dir, ['fractal', 'summary', 'profiles'])
     p, g3, phys = case.params, case.grid, case.physics
     H, H0 = p['H'], case.H0

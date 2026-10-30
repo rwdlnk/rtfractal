@@ -10,7 +10,7 @@ from .boxcount.triangles3d import box_counting_3d
 NAN_RESULT = dict(dimension=np.nan, error=np.nan, r_squared=np.nan)
 
 
-def dimension_of_segments(segs, min_box, max_box=None, factor=1.5, backend=None, offsets='legacy'):
+def dimension_of_segments(segs, min_box, max_box=None, factor=1.5, backend=None, offsets='covering'):
     if len(segs) == 0:
         return dict(NAN_RESULT)
     if max_box is None:
@@ -22,7 +22,7 @@ def dimension_of_segments(segs, min_box, max_box=None, factor=1.5, backend=None,
     return res
 
 
-def dimension_2d(field, level=0.5, min_box=0.001, max_box=None, factor=1.5, backend=None, offsets='legacy'):
+def dimension_2d(field, level=0.5, min_box=0.001, max_box=None, factor=1.5, backend=None, offsets='covering'):
     """Dimension of the `level` contour of field['f'] (legacy RTAnalyzer.compute_fractal_dimension)."""
     segs = interface.segments(interface.contours(field['f'], field['x'], field['y'], level))
     res = dimension_of_segments(segs, min_box, max_box, factor, backend, offsets)
@@ -30,7 +30,7 @@ def dimension_2d(field, level=0.5, min_box=0.001, max_box=None, factor=1.5, back
     return res
 
 
-def dimension_3d(mesh, initial, factor=1.5, num_steps=20, min_delta=None, backend=None, log=None, offsets='legacy'):
+def dimension_3d(mesh, initial, factor=1.5, num_steps=20, min_delta=None, backend=None, log=None, offsets='covering'):
     deltas, counts = box_counting_3d(mesh, initial, factor, num_steps, min_delta, backend=backend, log=log,
                                      offsets=offsets)
     return scaling.dimension_3d(deltas, counts)
