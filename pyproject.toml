@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "rtfractal"
+version = "0.1.0"
+description = "Fractal and mixing analysis of Rayleigh-Taylor interfaces (2D/3D; SOLA-VOF, OpenFOAM, LBM output)"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "R. W. Douglass", email = "rwdlanm@gmail.com" }]
+dependencies = [
+    "numpy>=1.24",
+    "scipy>=1.10",
+    "pandas>=2.0",
+    "scikit-image>=0.21",
+    "numba>=0.58",
+    "matplotlib>=3.6",
+]
+
+[project.optional-dependencies]
+# Only needed to read binary or XML (.vtp) interface meshes; ASCII legacy VTK is read natively.
+vtk = ["vtk>=9.0"]
+test = ["pytest>=7", "vtk>=9.0"]   # vtk: only for the legacy mesh loader in regression tests
+
+[project.scripts]
+rtfractal = "rtfractal.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "regression: compares against the legacy analyzers on the reference cases (slow; skipped if the data are absent)",
+    "cuda: needs a CUDA GPU",
+]
