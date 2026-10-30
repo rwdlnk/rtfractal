@@ -31,13 +31,18 @@ rtfractal analyze CASE --backend cpu        # or cuda; default auto (also $RTFRA
 rtfractal analyze CASE --output-dir OUT     # default CASE/analysis
 rtfractal analyze CASE --contour-levels 0.1,0.5,0.9     # 2D
 rtfractal analyze CASE --skip-energy                     # 3D: don't read U
-rtfractal analyze CASE --offsets legacy                  # reproduce FractalParameterAI numbers
+rtfractal analyze CASE --legacy                          # reproduce FractalParameterAI numbers exactly
+rtfractal analyze CASE --offsets legacy|covering --ladder legacy|L8 --trim legacy|r2   # individually
 ```
 
 The output layout and the columns of `analysis/summary/temporal_results.csv`
-match the legacy analyzers. The numbers differ by default: rtfractal uses
-covering grid-origin offsets (see "Known issues", item 1). Pass
-`--offsets legacy` to reproduce the legacy analyzers bit for bit.
+match the legacy analyzers. The numbers differ by default, because three
+inherited problems are fixed (see "Known issues"):
+- covering grid-origin offsets
+- a largest box of L/8, instead of L/2 in 2D and min(L, W)/2 in 3D
+- the R² end-point trim test
+
+Pass `--legacy` to reproduce the legacy analyzers bit for bit.
 
 From Python:
 ```python
@@ -77,8 +82,8 @@ side by side.
 
 ## Known issues inherited from the legacy algorithm
 
-Item 1 is fixed by default (decided 2026-10-30); the others are still
-reproduced on purpose so results match.
+Items 1, 2 and 4 are fixed by default (decided 2026-10-30). `--legacy`
+reproduces all of them.
 
 1. **Grid-origin offsets don't cover the set** (`boxcount/offsets.py`, `--offsets`).
    **Fixed: the default is now `covering`; `legacy` reproduces the old behaviour.**
@@ -102,11 +107,15 @@ reproduced on purpose so results match.
      against 1.76 legacy; 3D D is about 2.61 against 2.76. D3D − D2D stays
      close to +1 (+0.94 against +0.98).
 2. **The 2D boundary-removal test compares r, not R², against 0.95**
-   (`boxcount/scaling.py`). In 2D r ≈ −1, so the test always trims the first
+   (`boxcount/scaling.py`, `--trim`). **Fixed: the default is now `r2`.** In 2D r ≈ −1, so the test always trims the first
    and last box size whenever the ladder has more than 8 sizes. In 3D r ≈ +1,
    so the test works as intended.
 3. **Offset thresholds are absolute lengths** (0.005 m and 0.02 m), not
-   fractions of the domain.
+   fractions of the domain. Not changed.
+4. **The largest box was L/2** (`--ladder`). The validation paper states
+   extent/8. **Fixed: the default is now `L8`.** At L/2 even smooth curves
+   and surfaces give D biased high. `projected_dimension` (a 3D diagnostic)
+   still uses L/2.
 
 ## Origin
 

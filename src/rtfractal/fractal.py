@@ -10,30 +10,32 @@ from .boxcount.triangles3d import box_counting_3d
 NAN_RESULT = dict(dimension=np.nan, error=np.nan, r_squared=np.nan)
 
 
-def dimension_of_segments(segs, min_box, max_box=None, factor=1.5, backend=None, offsets='covering'):
+def dimension_of_segments(segs, min_box, max_box=None, factor=1.5, backend=None, offsets='covering', trim='r2'):
     if len(segs) == 0:
         return dict(NAN_RESULT)
     if max_box is None:
         ext = max(np.ptp(np.r_[segs[:, 0], segs[:, 2]]), np.ptp(np.r_[segs[:, 1], segs[:, 3]]))
-        max_box = ext / 2
+        max_box = ext / 8
     sizes, counts, bbox = box_counting_2d(segs, min_box, max_box, factor, backend, offsets)
-    res = scaling.dimension_2d(sizes, counts)
+    res = scaling.dimension_2d(sizes, counts, trim)
     res['bounding_box'] = bbox
     return res
 
 
-def dimension_2d(field, level=0.5, min_box=0.001, max_box=None, factor=1.5, backend=None, offsets='covering'):
+def dimension_2d(field, level=0.5, min_box=0.001, max_box=None, factor=1.5, backend=None, offsets='covering',
+                 trim='r2'):
     """Dimension of the `level` contour of field['f'] (legacy RTAnalyzer.compute_fractal_dimension)."""
     segs = interface.segments(interface.contours(field['f'], field['x'], field['y'], level))
-    res = dimension_of_segments(segs, min_box, max_box, factor, backend, offsets)
+    res = dimension_of_segments(segs, min_box, max_box, factor, backend, offsets, trim)
     res['n_segments'] = len(segs)
     return res
 
 
-def dimension_3d(mesh, initial, factor=1.5, num_steps=20, min_delta=None, backend=None, log=None, offsets='covering'):
+def dimension_3d(mesh, initial, factor=1.5, num_steps=20, min_delta=None, backend=None, log=None, offsets='covering',
+                 trim='r2'):
     deltas, counts = box_counting_3d(mesh, initial, factor, num_steps, min_delta, backend=backend, log=log,
                                      offsets=offsets)
-    return scaling.dimension_3d(deltas, counts)
+    return scaling.dimension_3d(deltas, counts, trim)
 
 
 def projected_dimension(mesh, dx, dy):

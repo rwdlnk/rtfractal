@@ -6,12 +6,13 @@ reference values) are in `../RT_ANALYSIS_TOOLS.md`.
 
 - **Every change must keep the regression tests passing.** They require
   bit-identity with the legacy code, run in-process (`tests/test_regression.py`),
-  so they pass the legacy options explicitly (`offsets='legacy'`).
+  so they pass the legacy options explicitly (`offsets='legacy', trim='legacy'`).
   A deliberate algorithm change goes behind an option with the legacy
   behaviour as default, until Rod decides otherwise.
-- **Decided deviations from legacy (defaults):** covering grid-origin offsets
-  (Rod, 2026-10-30; `--offsets legacy` reproduces old numbers). The ladder
-  (max box L/2) and the 2D trim quirk are still legacy.
+- **Decided deviations from legacy (defaults, Rod 2026-10-30):** covering
+  grid-origin offsets, largest box L/8 (2D and 3D), and the R² end-point trim
+  test. `--legacy` (or `--offsets/--ladder/--trim legacy`) reproduces the old
+  analyzers.
 - **Kernels exist for both targets.** Each is written once as plain Python and
   compiled for CPU (njit) and CUDA (device functions passed through closures).
   Don't use builtin `min`/`max` with more than one argument inside them.

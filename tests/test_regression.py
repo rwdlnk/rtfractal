@@ -58,7 +58,7 @@ def test_2d_bit_identical_to_legacy(legacy2d, path, t):
         dl = legacy2d.read_vtk_file(snap.path) if c.format == 'solavof' else legacy2d.read_openfoam_field(path, snap.t)
         ref = legacy2d.compute_fractal_dimension(dl, min_box_size=mn, max_box_size=mx, box_size_factor=1.5)
     assert np.array_equal(dl['f'], d['f'])
-    new = fractal.dimension_2d(d, min_box=mn, max_box=mx, factor=1.5, offsets='legacy')
+    new = fractal.dimension_2d(d, min_box=mn, max_box=mx, factor=1.5, offsets='legacy', trim='legacy')
     assert new['dimension'] == ref['dimension'] or (np.isnan(new['dimension']) and np.isnan(ref['dimension']))
     assert list(new['box_counts']) == list(ref['box_counts'])
 
@@ -79,9 +79,9 @@ def test_3d_bit_identical_to_legacy(t):
             ref = compute_fractal_dimension_3d(lm, **kw)
     except ValueError:                      # too few non-zero counts: both codes must refuse
         with pytest.raises(ValueError):
-            fractal.dimension_3d(nm, initial=kw['initial_delta'], num_steps=20, min_delta=kw['min_delta'], offsets='legacy')
+            fractal.dimension_3d(nm, initial=kw['initial_delta'], num_steps=20, min_delta=kw['min_delta'], offsets='legacy', trim='legacy')
         return
-    new = fractal.dimension_3d(nm, initial=kw['initial_delta'], num_steps=20, min_delta=kw['min_delta'], offsets='legacy')
+    new = fractal.dimension_3d(nm, initial=kw['initial_delta'], num_steps=20, min_delta=kw['min_delta'], offsets='legacy', trim='legacy')
     assert new['dimension'] == ref.dimension
     assert list(new['box_counts']) == list(ref.n_boxes)
 

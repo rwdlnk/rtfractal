@@ -7,7 +7,7 @@
    maximising R^2 * span among those with R^2 >= 0.97 and span >= 1 decade.
 3. Fallback: fit the whole ladder; NaN if R^2 < 0.97.
 
-LEGACY QUIRK (reproduced on purpose, see TRIM_R_TEST): the end-point test
+LEGACY QUIRK (trim='legacy' reproduces it; default trim='r2' fixes it): the end-point test
 compares the correlation coefficient r -- not R^2 -- against 0.95.  The 2D
 analyzer fits ln(count) vs ln(size), where r ~ -1, so `r < 0.95` is always
 true and both end points are always trimmed.  The 3D analyzer fits
@@ -22,11 +22,11 @@ SLOPE_DEV = 0.15
 TRIM_R_MIN = 0.95
 
 
-def _trim_ends(x, y, trim='legacy'):
+def _trim_ends(x, y, trim='r2'):
     """Return (start, end) slice bounds after boundary removal on (x, y).
 
-    trim='legacy' tests the correlation coefficient r < 0.95 (see module note);
-    trim='r2' tests R^2 = r^2 < 0.95 as intended."""
+    trim='r2' (default) tests R^2 = r^2 < 0.95 as intended; trim='legacy'
+    tests the correlation coefficient r < 0.95 (see module note)."""
     n = len(x)
     seg = max(3, n // 4)
     if n <= 8 or n < 3 * seg:
@@ -70,7 +70,7 @@ def _best_window(x, y):
     return (sl if rv ** 2 >= R2_MIN else np.nan), se, rv ** 2, 0, len(x)
 
 
-def dimension_2d(sizes, counts, trim='legacy'):
+def dimension_2d(sizes, counts, trim='r2'):
     """Legacy 2D protocol.  -> dict(dimension, error, r_squared, box_sizes, box_counts)
     where box_sizes/box_counts are the fitted window."""
     sizes = np.asarray(sizes, dtype=np.float64)
@@ -81,7 +81,7 @@ def dimension_2d(sizes, counts, trim='legacy'):
     return dict(dimension=-sl, error=se, r_squared=r2, box_sizes=sizes[a:b], box_counts=counts[a:b])
 
 
-def dimension_3d(deltas, counts, trim='legacy'):
+def dimension_3d(deltas, counts, trim='r2'):
     """Legacy 3D protocol (log10 of 1/delta).  Same return keys as dimension_2d."""
     deltas = np.asarray(deltas, dtype=np.float64)
     counts = np.asarray(counts)

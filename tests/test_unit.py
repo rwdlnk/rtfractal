@@ -48,8 +48,8 @@ def test_scaling_recovers_exact_power_law():
 def test_2d_trim_quirk_always_trims_both_ends():
     """Documented legacy quirk: in 2D r < 0 so the r < 0.95 test always trims."""
     x = np.log(0.2 / 1.5 ** np.arange(12))      # ln(size)
-    assert scaling._trim_ends(x, -1.5 * x) == (1, 11)    # 2D form: r = -1, always trimmed
-    assert scaling._trim_ends(-x, -1.5 * x) == (0, 12)   # 3D form (1/size): r = +1, perfect line kept
+    assert scaling._trim_ends(x, -1.5 * x, 'legacy') == (1, 11)    # 2D form: r = -1, always trimmed
+    assert scaling._trim_ends(-x, -1.5 * x, 'legacy') == (0, 12)   # 3D form (1/size): r = +1, perfect line kept
 
 
 # ------------------------------------------------------------- 2D counting

@@ -23,21 +23,34 @@ def _level_col(lv):
     return f'F{int(round(lv * 10)):02d}'
 
 
+LADDERS = ('L8', 'legacy')
+
+
+def _ladder_div(ladder):
+    """Largest box = extent / this.  'L8': L/8 (the validation paper);
+    'legacy': L/2 in 2D, min(L, W)/2 in 3D."""
+    if ladder not in LADDERS:
+        raise ValueError(f'ladder must be one of {LADDERS}')
+    return 8 if ladder == 'L8' else 2
+
+
 def _dirs(analysis_dir, names):
     for n in names:
         os.makedirs(os.path.join(analysis_dir, n), exist_ok=True)
 
 
-def run_2d(case, analysis_dir, contour_levels=(0.5,), backend=None, log=print, offsets='covering'):
+def run_2d(case, analysis_dir, contour_levels=(0.5,), backend=None, log=print, offsets='covering', ladder='L8',
+           trim='r2'):
     contour_levels = sorted(set(contour_levels))
     _dirs(analysis_dir, ['interfaces', 'fractal', 'summary', 'profiles'])
     phys, H, H0 = case.physics, case.physics.H, case.H0
 
-    # Fixed, grid-tied ladder: L/2 down to 2 dx by 1.5, with L and dx measured
-    # between cell centres (legacy convention: L here is L_domain - dx).
+    # Fixed, grid-tied ladder: L/8 (ladder='L8') or L/2 (ladder='legacy') down
+    # to 2 dx by 1.5, with L and dx measured between cell centres (legacy
+    # convention: L here is L_domain - dx).
     first = case.read_2d(case.snapshots[0])
     xc = first['x'][:, 0]
-    max_box, min_box, factor = float(xc[-1] - xc[0]) / 2, float(xc[1] - xc[0]) * 2, 1.5
+    max_box, min_box, factor = float(xc[-1] - xc[0]) / _ladder_div(ladder), float(xc[1] - xc[0]) * 2, 1.5
     log(f"  box ladder: max={max_box:.6f}, min={min_box:.6f}, factor={factor}")
 
     rows = []
@@ -80,7 +93,7 @@ def run_2d(case, analysis_dir, contour_levels=(0.5,), backend=None, log=print, o
                 for s in segs:
                     fh.write(f"{s[0]:.7f},{s[1]:.7f} {s[2]:.7f},{s[3]:.7f}\n")
             try:
-                r = fractal.dimension_of_segments(segs, min_box, max_box, factor, backend, offsets)
+                r = fractal.dimension_of_segments(segs, min_box, max_box, factor, backend, offsets, trim)
             except Exception as e:
                 log(f"  WARNING: fractal dimension (F={lv}) failed: {e}")
                 r = dict(fractal.NAN_RESULT)
@@ -114,7 +127,7 @@ def run_2d(case, analysis_dir, contour_levels=(0.5,), backend=None, log=print, o
     return df
 
 
-def run_3d(case, analysis_dir, energy=True, backend=None, log=print, offsets='covering'):
+def run_3d(case, analysis_dir, energy=True, backend=None, log=print, offsets='covering', ladder='L8', trim='r2'):
     _dirs(analysis_dir, ['fractal', 'summary', 'profiles'])
     p, g3, phys = case.params, case.grid, case.physics
     H, H0 = p['H'], case.H0
@@ -172,9 +185,10 @@ def run_3d(case, analysis_dir, energy=True, backend=None, log=print, offsets='co
             mesh = case.interface_mesh(snap)
             n_tri, area = mesh.n_triangles, mesh.surface_area
             if n_tri >= 10:
-                fd = fractal.dimension_3d(mesh, initial=min(p['L'], p['W']) / 2, factor=1.5, num_steps=20,
+                initial = p['L'] / 8 if ladder == 'L8' else min(p['L'], p['W']) / _ladder_div(ladder)
+                fd = fractal.dimension_3d(mesh, initial=initial, factor=1.5, num_steps=20,
                                           min_delta=max(g3.dx, g3.dy, g3.dz) * 2, backend=backend, log=log,
-                                          offsets=offsets)
+                                          offsets=offsets, trim=trim)
                 pd.DataFrame({'cube_size': fd['box_sizes'], 'cube_count': fd['box_counts'],
                               'cube_size_nondim': np.asarray(fd['box_sizes']) / H}).to_csv(
                     os.path.join(analysis_dir, 'fractal', f'boxcount_3d_t{snap.t:.2f}.csv'), index=False)
