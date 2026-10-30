@@ -25,45 +25,23 @@ def find_vtk_files(case):
     return [(t, s, p) for t, s, p, _, _ in files], (files[0][3], files[0][4])
 
 
-def read_vtk(path):
-    """Rectilinear-grid VTK -> dict(x, y, f, [P, U, V]) on cell centres,
-    arrays shaped (nx, ny) with x[:, j] constant in j (legacy layout)."""
+def read_vtk(path, fields=None):
+    """Rectilinear-grid VTK -> dict(x, y, f[, P, U, V]) on cell centres, arrays
+    shaped (nx, ny) with x[:, j] constant in j (legacy layout).  `fields`
+    limits which SCALARS are parsed (e.g. ('F',)); default all."""
     with open(path) as fh:
-        lines = fh.read().split('\n')
-    coords, scalars, cell_data, dims = {}, {}, False, None
-    i = 0
-    n = len(lines)
-    while i < n:
-        s = lines[i].strip()
-        if s.startswith('DIMENSIONS'):
-            dims = tuple(int(v) for v in s.split()[1:4])
-        elif s[:1] in 'XYZ' and '_COORDINATES' in s:
-            axis, count = s[0], int(s.split()[1])
-            vals = []
-            i += 1
-            while len(vals) < count:
-                vals.extend(lines[i].split())
-                i += 1
-            coords[axis] = np.array(vals, dtype=np.float64)
-            continue
-        elif s.startswith('CELL_DATA'):
-            cell_data = True
-        elif s.startswith('SCALARS '):
-            name = s.split()[1]
-            i += 2                      # skip LOOKUP_TABLE
-            vals = []
-            while i < n and not lines[i].strip().startswith('SCALARS'):
-                parts = lines[i].split()
-                if parts:
-                    try:
-                        vals.extend(float(v) for v in parts)
-                    except ValueError:
-                        break
-                i += 1
-            scalars[name] = np.array(vals, dtype=np.float64)
-            continue
-        i += 1
-    if not cell_data:
+        text = fh.read()
+
+    def block(start, count):
+        return np.array(text[start:].split(None, count)[:count], dtype=np.float64)
+
+    m = re.search(r'DIMENSIONS\s+(\d+)\s+(\d+)\s+(\d+)', text)
+    dims = tuple(int(g) for g in m.groups())
+    coords = {}
+    for axis in 'XY':
+        m = re.search(axis + r'_COORDINATES\s+(\d+)\s+\w+', text)
+        coords[axis] = block(m.end(), int(m.group(1)))
+    if 'CELL_DATA' not in text:
         raise ValueError(f'{path}: only CELL_DATA SOLA-VOF files are supported')
     x, y = coords['X'], coords['Y']
     nxc, nyc = dims[0] - 1, dims[1] - 1
@@ -71,9 +49,12 @@ def read_vtk(path):
     yc = 0.5 * (y[:-1] + y[1:])
     xg, yg = np.meshgrid(xc, yc)
     out = {'x': xg.T, 'y': yg.T}
-    for name, v in scalars.items():
-        if v.size == nxc * nyc:
-            out['f' if name == 'F' else name] = v.reshape(nyc, nxc).T
+    for m in re.finditer(r'SCALARS\s+(\S+)[^\n]*\n\s*LOOKUP_TABLE[^\n]*\n', text):
+        name = m.group(1)
+        if fields is not None and name not in fields:
+            continue
+        v = block(m.end(), nxc * nyc)
+        out['f' if name == 'F' else name] = v.reshape(nyc, nxc).T
     return out
 
 

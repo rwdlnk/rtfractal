@@ -100,8 +100,8 @@ class SolaVofCase:
         self.H0 = p['H0']
         self.snapshots = [Snapshot(t, step, fp) for t, step, fp in files]
 
-    def read_2d(self, snap):
-        return sv.read_vtk(snap.path)
+    def read_2d(self, snap, fields=None):
+        return sv.read_vtk(snap.path, fields)
 
 
 class OpenFOAM2DCase:
@@ -121,7 +121,8 @@ class OpenFOAM2DCase:
         self.H0 = H / 2.0
         self.snapshots = [Snapshot(t, int(t * 1000), d) for t, d in of.time_dirs(path)]
 
-    def read_2d(self, snap):
+    def read_2d(self, snap, fields=None):
+        """fields: subset of ('F', 'U', 'P') to read (default all present)."""
         xc = 0.5 * (self.x_nodes[:-1] + self.x_nodes[1:])
         yc = 0.5 * (self.y_nodes[:-1] + self.y_nodes[1:])
         n = self.nx * self.ny
@@ -129,12 +130,12 @@ class OpenFOAM2DCase:
         xg, yg = np.meshgrid(xc, yc)
         out = {'x': xg.T, 'y': yg.T, 'f': f.reshape(self.ny, self.nx).T}
         up = os.path.join(snap.path, 'U')
-        if os.path.isfile(up):
+        if os.path.isfile(up) and (fields is None or 'U' in fields):
             u = of.read_vector_field(up, n)
             out['U'] = u[:, 0].reshape(self.ny, self.nx).T
             out['V'] = u[:, 1].reshape(self.ny, self.nx).T
         pp = os.path.join(snap.path, 'p_rgh')
-        if os.path.isfile(pp):
+        if os.path.isfile(pp) and (fields is None or 'P' in fields):
             out['P'] = of.read_scalar_field(pp, n).reshape(self.ny, self.nx).T
         return out
 

@@ -74,9 +74,13 @@ def read_vector_field(path, n_expected=None):
     with open(path) as fh:
         text = fh.read()
     m = re.search(r'internalField\s+nonuniform\s+List<vector>\s*(\d+)', text)
-    if not m:
-        raise ValueError(f'cannot parse internalField in {path}')
-    vals = _numbers(_list_block(text, m.end())).reshape(-1, 3)
+    if m:
+        vals = _numbers(_list_block(text, m.end())).reshape(-1, 3)
+    else:
+        m = re.search(r'internalField\s+uniform\s+\(([^)]*)\)', text)
+        if not m or n_expected is None:
+            raise ValueError(f'cannot parse internalField in {path}')
+        vals = np.tile(np.array(m.group(1).split(), dtype=np.float64), (n_expected, 1))
     if n_expected is not None and len(vals) != n_expected:
         raise ValueError(f'{path}: {len(vals)} vectors, expected {n_expected}')
     return vals

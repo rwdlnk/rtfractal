@@ -22,8 +22,11 @@ SLOPE_DEV = 0.15
 TRIM_R_MIN = 0.95
 
 
-def _trim_ends(x, y):
-    """Return (start, end) slice bounds after boundary removal on (x, y)."""
+def _trim_ends(x, y, trim='legacy'):
+    """Return (start, end) slice bounds after boundary removal on (x, y).
+
+    trim='legacy' tests the correlation coefficient r < 0.95 (see module note);
+    trim='r2' tests R^2 = r^2 < 0.95 as intended."""
     n = len(x)
     seg = max(3, n // 4)
     if n <= 8 or n < 3 * seg:
@@ -34,6 +37,10 @@ def _trim_ends(x, y):
         sl_l, _, r_l, _, _ = stats.linregress(x[-seg:], y[-seg:])
     except Exception:
         return 0, n
+    if trim == 'r2':
+        r_f, r_l = r_f ** 2, r_l ** 2
+    elif trim != 'legacy':
+        raise ValueError("trim must be 'legacy' or 'r2'")
     ts = te = 0
     if sl_m != 0:
         if abs(sl_f - sl_m) / abs(sl_m) > SLOPE_DEV or r_f < TRIM_R_MIN:
@@ -63,24 +70,24 @@ def _best_window(x, y):
     return (sl if rv ** 2 >= R2_MIN else np.nan), se, rv ** 2, 0, len(x)
 
 
-def dimension_2d(sizes, counts):
+def dimension_2d(sizes, counts, trim='legacy'):
     """Legacy 2D protocol.  -> dict(dimension, error, r_squared, box_sizes, box_counts)
     where box_sizes/box_counts are the fitted window."""
     sizes = np.asarray(sizes, dtype=np.float64)
     counts = np.asarray(counts, dtype=np.float64)
-    s, e = _trim_ends(np.log(sizes), np.log(counts))
+    s, e = _trim_ends(np.log(sizes), np.log(counts), trim)
     sizes, counts = sizes[s:e], counts[s:e]
     sl, se, r2, a, b = _best_window(np.log10(sizes), np.log10(counts))
     return dict(dimension=-sl, error=se, r_squared=r2, box_sizes=sizes[a:b], box_counts=counts[a:b])
 
 
-def dimension_3d(deltas, counts):
+def dimension_3d(deltas, counts, trim='legacy'):
     """Legacy 3D protocol (log10 of 1/delta).  Same return keys as dimension_2d."""
     deltas = np.asarray(deltas, dtype=np.float64)
     counts = np.asarray(counts)
     x = np.log10(1.0 / deltas)
     y = np.log10(counts)
-    s, e = _trim_ends(x, y)
+    s, e = _trim_ends(x, y, trim)
     deltas, counts, x, y = deltas[s:e], counts[s:e], x[s:e], y[s:e]
     sl, se, r2, a, b = _best_window(x, y)
     return dict(dimension=sl, error=se, r_squared=r2, box_sizes=deltas[a:b], box_counts=counts[a:b])

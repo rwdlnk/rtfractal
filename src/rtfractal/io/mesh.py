@@ -9,6 +9,7 @@ XML files fall back to the optional vtk package.
 from dataclasses import dataclass
 
 import numpy as np
+from numba import njit
 
 
 @dataclass
@@ -63,15 +64,45 @@ class TriangleMesh:
 
 def _fan(conn, offsets):
     """Fan-triangulate polygons (connectivity + offsets); drop polygons with < 3 vertices."""
-    tris = []
-    for a, b in zip(offsets[:-1], offsets[1:]):
-        n = b - a
-        if n == 3:
-            tris.append(conn[a:b])
-        elif n > 3:
-            for j in range(1, n - 1):
-                tris.append([conn[a], conn[a + j], conn[a + j + 1]])
-    return np.array(tris, dtype=np.int64).reshape(-1, 3)
+    conn = np.asarray(conn, dtype=np.int64)
+    offsets = np.asarray(offsets, dtype=np.int64)
+    sizes = np.diff(offsets)
+    out = np.empty((int(np.maximum(sizes - 2, 0).sum()), 3), dtype=np.int64)
+    _fan_fill(conn, offsets, out)
+    return out
+
+
+@njit(cache=True)
+def _fan_fill(conn, offsets, out):
+    k = 0
+    for p in range(len(offsets) - 1):
+        a, n = offsets[p], offsets[p + 1] - offsets[p]
+        for j in range(1, n - 1):
+            out[k, 0] = conn[a]
+            out[k, 1] = conn[a + j]
+            out[k, 2] = conn[a + j + 1]
+            k += 1
+
+
+@njit(cache=True)
+def _split_cells(raw, n_poly):
+    """VTK legacy cell list [n, i0..in-1, n, ...] -> (connectivity, offsets)."""
+    offsets = np.empty(n_poly + 1, dtype=np.int64)
+    offsets[0] = 0
+    k = 0
+    for p in range(n_poly):
+        offsets[p + 1] = offsets[p] + raw[k]
+        k += raw[k] + 1
+    conn = np.empty(offsets[-1], dtype=np.int64)
+    k = 0
+    c = 0
+    for p in range(n_poly):
+        m = raw[k]
+        for j in range(m):
+            conn[c] = raw[k + 1 + j]
+            c += 1
+        k += m + 1
+    return conn, offsets
 
 
 def _read_legacy_ascii(path):
@@ -80,25 +111,27 @@ def _read_legacy_ascii(path):
     if b'ASCII' not in head.split(b'\n', 3)[2].upper():
         return None
     with open(path) as fh:
-        tokens = fh.read().split()
-    i = tokens.index('POINTS')
-    n_pts, dtype = int(tokens[i + 1]), tokens[i + 2].lower()
-    pts = np.array(tokens[i + 3:i + 3 + 3 * n_pts], dtype=np.float64)
-    if dtype == 'float':
+        text = fh.read()
+    i = text.index('POINTS')
+    eol = text.index('\n', i)
+    _, n_pts, dtype = text[i:eol].split()[:3]
+    j = text.index('POLYGONS', eol)
+    pts = np.array(text[eol:j].split(), dtype=np.float64)[:3 * int(n_pts)]
+    if dtype.lower() == 'float':        # vtk's reader stores 'float' points as float32
         pts = pts.astype(np.float32).astype(np.float64)
-    pts = pts.reshape(-1, 3)
-    j = tokens.index('POLYGONS', i + 3 + 3 * n_pts)
-    n_poly, size = int(tokens[j + 1]), int(tokens[j + 2])
-    raw = np.array(tokens[j + 3:j + 3 + size], dtype=np.int64)
-    conn, offsets, k = [], [0], 0
-    for _ in range(n_poly):
-        m = raw[k]
-        conn.extend(raw[k + 1:k + 1 + m])
-        offsets.append(offsets[-1] + m)
-        k += m + 1
-    if not conn:
+    eol2 = text.index('\n', j)
+    _, n_poly, size = text[j:eol2].split()[:3]
+    nxt = len(text)
+    for kw in ('POINT_DATA', 'CELL_DATA', 'LINES', 'VERTICES', 'TRIANGLE_STRIPS'):
+        q = text.find(kw, eol2)
+        if q != -1:
+            nxt = min(nxt, q)
+    raw = np.array(text[eol2:nxt].split()[:int(size)], dtype=np.int64)
+    del text
+    conn, offsets = _split_cells(raw, int(n_poly))
+    if len(conn) == 0:
         raise ValueError(f'no polygons in {path}')
-    return TriangleMesh.from_arrays(pts, _fan(np.array(conn, dtype=np.int64), offsets))
+    return TriangleMesh.from_arrays(pts.reshape(-1, 3), _fan(conn, offsets))
 
 
 def _read_with_vtk(path):
