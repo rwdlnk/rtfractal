@@ -19,5 +19,6 @@ reference values) are in `../RT_ANALYSIS_TOOLS.md`.
 - **Archived CSVs differ from fresh runs in the 16th significant digit** when
   the numpy/scipy builds differ. Don't chase that.
 - **Dev venv:** `.venv` (current numpy/numba). Run `.venv/bin/python -m pytest -q`.
-- **Not ported yet:** phase 2 (multifractal), phase 3 (spectra, velocity),
-  phase-1 plots.
+- **Phases 1–3 are ported** (`pipeline/phase{1,2,3}.py`); `tests/test_phase{2,3}.py`
+  hold their live bit-identity tests (`pytest` takes about 2 minutes).
+  **Not ported yet:** the plots for all phases.

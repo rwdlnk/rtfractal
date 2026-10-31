@@ -5,7 +5,7 @@ import sys
 
 from . import __version__, backend
 from .io.case import open_case
-from .pipeline import phase1
+from .pipeline import phase1, phase2, phase3
 
 
 def _analyze(a):
@@ -18,14 +18,32 @@ def _analyze(a):
           f"snapshots={len(case.snapshots)} backend={be}\n  {case.physics.summary()}  H0={case.H0}\n"
           f"  box counting: offsets={a.offsets} ladder={a.ladder} trim={a.trim}")
     phases = {int(p) for p in a.phases.split(',')}
-    if phases - {1}:
-        sys.exit("only phase 1 is ported so far; run the legacy analyzers for phases 2 and 3")
+    if phases - {1, 2, 3}:
+        sys.exit("--phases takes a comma-separated subset of 1,2,3")
+    mf_times = [float(t) for t in a.mf_times.split(',')]
+    box = dict(backend=be, offsets=a.offsets, ladder=a.ladder, trim=a.trim)
+    df = None
     if case.dim == 2:
-        levels = [float(v) for v in a.contour_levels.split(',')]
-        phase1.run_2d(case, out, contour_levels=levels, backend=be, offsets=a.offsets, ladder=a.ladder, trim=a.trim)
+        if 1 in phases:
+            levels = [float(v) for v in a.contour_levels.split(',')]
+            print("\nPhase 1: mixing + fractal dimension")
+            df = phase1.run_2d(case, out, contour_levels=levels, **box)
+        if 2 in phases:
+            print("\nPhase 2: multifractal spectrum")
+            phase2.run_2d(case, out, times=mf_times, df=df, **box)    # df=None: reads summary/temporal_results.csv
+        if 3 in phases:
+            print("\nPhase 3: spectra + velocity statistics")
+            phase3.run_2d(case, out, times=mf_times)                 # legacy 2D uses the --mf-times list
     else:
-        phase1.run_3d(case, out, energy=not a.skip_energy, backend=be, offsets=a.offsets, ladder=a.ladder,
-                      trim=a.trim)
+        if 1 in phases:
+            print("\nPhase 1: mixing + fractal dimension")
+            phase1.run_3d(case, out, energy=not a.skip_energy, **box)
+        if 2 in phases:
+            print("\nPhase 2: multifractal spectrum")
+            phase2.run_3d(case, out, times=mf_times, **box)
+        if 3 in phases:
+            print("\nPhase 3: spectra + velocity statistics")
+            phase3.run_3d(case, out, times=[float(t) for t in a.spec_times.split(',')])
 
 
 def main(argv=None):
@@ -34,7 +52,12 @@ def main(argv=None):
     sub = p.add_subparsers(dest='cmd', required=True)
     a = sub.add_parser('analyze', help='analyse a SOLA-VOF, OpenFOAM or rtlbm case (2D or 3D, auto-detected)')
     a.add_argument('case')
-    a.add_argument('--phases', default='1', help='comma-separated phases to run (only 1 so far)')
+    a.add_argument('--phases', default='1,2,3',
+                   help='comma-separated phases: 1 mixing + D, 2 multifractal, 3 spectra + velocity (default all)')
+    a.add_argument('--mf-times', default='2,4,6,8,10,12,14,16,18',
+                   help='target times [s] for phase 2 (and phase 3 in 2D); nearest snapshot is used')
+    a.add_argument('--spec-times', default='2,4,6,8,10,12,14,16,18,20',
+                   help='3D: target times [s] for phase 3 (time directory named exactly)')
     a.add_argument('--output-dir', help='default: CASE/analysis')
     a.add_argument('--backend', choices=['auto', 'cpu', 'cuda'], default=None,
                    help='box-counting backend (default auto, or $RTFRACTAL_BACKEND)')
