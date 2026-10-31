@@ -115,7 +115,12 @@ reproduces all of them.
 4. **The largest box was L/2** (`--ladder`). The validation paper states
    extent/8. **Fixed: the default is now `L8`.** At L/2 even smooth curves
    and surfaces give D biased high. `projected_dimension` (a 3D diagnostic)
-   still uses L/2.
+   still uses L/2. It always used covering-style offsets, in the legacy code
+   too, so legacy D_proj values are not biased.
+5. **The legacy multifractal analyzers use the biased offsets too**
+   (`FractalParameterAI/analysis/multifractal_analyzer.py`,
+   `3D-FractalParameterAI/fractal3d/multifractal_3d.py`: origin `min + f·δ`).
+   Phase 2 is not ported yet; when it is, it must use covering offsets.
 
 ## Origin
 

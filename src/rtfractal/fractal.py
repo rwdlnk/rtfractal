@@ -42,8 +42,11 @@ def projected_dimension(mesh, dx, dy):
     """Dimension of the surface's x-y projection (depth axis z collapsed).
 
     Every unique edge is sampled at its end points and mid-point (edges are
-    shorter than the smallest box), points are binned with the usual origin
-    offsets (minimum count kept), and the legacy scaling window is applied.
+    shorter than the smallest box), points are binned with origin offsets
+    (minimum count kept), and the legacy scaling window is applied.  Binning
+    floor((p - min + f*box)/box) puts the origin at min - f*box, so this was
+    already covering-style in the legacy code (despite its comment) and
+    legacy D_proj values are unbiased.  Still uses max box L/2.
     -> (D, R^2)."""
     tris = mesh.triangles
     e = np.unique(np.sort(np.concatenate([tris[:, [0, 1]], tris[:, [1, 2]], tris[:, [2, 0]]]), axis=1), axis=0)
