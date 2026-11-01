@@ -152,10 +152,13 @@ offsets, ladder and trim. These are things to know before quoting values.
     in-process rather than reading it back from disk.
   - **Which legacy `--legacy` reproduces:** the current legacy code
     (FractalParameterAI `869103d`, 3D-FractalParameterAI `0d47341`) run live,
-    not older archived output. Legacy 2D multifractal output regenerated
-    before 2026-05-27 (for example the `analysis/multifractal.bak-20260527/`
-    folders at 1920×2400) came from an earlier `rt_analyzer.py`. Its D0 and
-    D0−D2 differ, so a mismatch against those folders is expected.
+    not older archived output. Legacy multifractal output written before
+    2026-03-22 predates two legacy commits that changed the computation:
+    `75a7763` (D_q monotonicity, scale sharing) and `0978034`/`7597f1f`
+    (domain-based scales, boundary removal). It therefore has different D0
+    and D0−D2, and a mismatch against it is expected. At 1920×2400 the
+    SOLA-VOF folders hold both generations side by side: `time_*` from
+    2026-03-16 and `parameter_*` from 2026-05-27.
   - **Screening D_q:** a projected D0−D2 of exactly 0 is an artefact of the
     concavity projection, not a measurement. There are three ways to get one:
     - the projection collapses τ(q) to a line for all q ≥ 0
