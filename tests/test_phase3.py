@@ -128,9 +128,27 @@ def test_tke_spectrum_2d_legacy_quirk():
     u = np.sin(2 * np.pi * 3 * x) * np.cos(2 * np.pi * 2 * y)
     v = np.sin(2 * np.pi * 7 * y)
     us, vs = spectra.field_spectrum_2d(u, x, y, 'u'), spectra.field_spectrum_2d(v, x, y, 'v')
-    t = spectra.tke_spectrum_2d(u, v, x, y)
+    t = spectra.tke_spectrum_2d(u, v, x, y, mode='legacy')
     assert t['power_law_slope'] == us['power_law_slope'] and t['dominant_wavelength'] == us['dominant_wavelength']
     assert t['total_energy'] == (us['total_energy'] + vs['total_energy']) / 2
+
+
+def test_tke_spectrum_2d_uses_u_and_v():
+    """Default TKE spectrum: radial average of (P_u + P_v)/2; total_energy is
+    the exact 1/2(<u'^2> + <v'^2>) (Parseval)."""
+    x, y = _grid(64, 64)
+    u = 0.1 * np.sin(2 * np.pi * 3 * x)                 # weak, large scale
+    v = np.sin(2 * np.pi * 9 * y)                       # dominant, smaller scale
+    t = spectra.tke_spectrum_2d(u, v, x, y, detrend=False, return_spectrum=True)
+    vs = spectra.field_spectrum_2d(v, x, y, 'v', detrend=False)
+    assert t['dominant_wavelength'] == pytest.approx(vs['dominant_wavelength'])
+    uc, vc = u - u.mean(), v - v.mean()
+    assert t['total_energy'] == pytest.approx(0.5 * (np.mean(uc ** 2) + np.mean(vc ** 2)), rel=1e-12)
+    K, pu, _ = spectra.power_2d(u, 1 / 64, 1 / 64, False)
+    _, pv, _ = spectra.power_2d(v, 1 / 64, 1 / 64, False)
+    assert np.sum(0.5 * (pu + pv)) / u.size == pytest.approx(t['total_energy'], rel=1e-12)
+    k, p = spectra.radial_average_log(K, 0.5 * (pu + pv))
+    assert np.array_equal(t['k'], k) and np.array_equal(t['power'], p)
 
 
 def test_fit_bands_exact():
@@ -252,7 +270,7 @@ def test_phase3_2d_bit_identical_to_legacy(legacy_rt, path, tmp_path):
             df = pd.DataFrame({'time': of_times})
             m._run_phase3_openfoam(analyzer, physics, path, of_times, str(tmp_path / 'legacy'), list(TIMES_2D),
                                    df, phys_nx=phys['NX'], phys_ny=phys['NY'])
-    res = phase3.run_2d(case, str(tmp_path / 'new'), times=TIMES_2D, log=lambda *a: None)
+    res = phase3.run_2d(case, str(tmp_path / 'new'), times=TIMES_2D, log=lambda *a: None, tke='legacy')
     files = _same_csvs(str(tmp_path / 'legacy'), str(tmp_path / 'new'))
     assert len(res['summary']) == 3 and len(res['velocity']) == 3
     assert 'velocity_statistics.csv' in files
@@ -295,7 +313,7 @@ def test_phase3_2d_kernels_match_legacy_classes(legacy_rt):
         same(psa.analyze_2d_field_spectrum(d[fld], d['x'], d['y'], fld, True),
              spectra.field_spectrum_2d(d[fld], d['x'], d['y'], fld, True))
     same(psa.analyze_tke_spectrum(d['U'], d['V'], d['x'], d['y'], True),
-         spectra.tke_spectrum_2d(d['U'], d['V'], d['x'], d['y']))
+         spectra.tke_spectrum_2d(d['U'], d['V'], d['x'], d['y'], mode='legacy'))
     ref = VelocityAnalyzer().analyze_velocity_field(d['U'], d['V'])
     new = velocity.velocity_stats_2d(d['U'], d['V'])
     for a, b in [('u_mean', 'u_mean'), ('v_mean', 'v_mean'), ('u_rms', 'u_rms'), ('v_rms', 'v_rms'),

@@ -174,8 +174,18 @@ offsets, ladder and trim. These are things to know before quoting values.
   - **Phase 1 CUDA kernels still use fused multiply-adds.** They can assign
     an element lying exactly on a box edge differently from the CPU.
 - **Spectra and velocity (phase 3):**
-  - **The 2D "TKE spectrum" slope and dominant wavelength are u's alone.**
-    Only total_energy averages u and v.
+  - **Fixed (default `--tke uv`):** the 2D TKE spectrum is now the radial
+    average of ½(P_u + P_v), the spectrum of TKE per unit mass ½(u′² + v′²).
+    Its total_energy is the exact ½(⟨u′²⟩ + ⟨v′²⟩). Legacy (`--tke legacy`)
+    took the slope, R² and dominant wavelength from u alone, and its
+    total_energy was a trapezoid over binned power, off by orders of
+    magnitude.
+  - **All radial spectra (2D fields, 3D horizontal slabs) are mean power per
+    mode P(k), not ring-integrated E(k).** In a 2D wavenumber plane
+    E(k) ∝ k·P(k), so a P(k) slope is one steeper than the E(k) slope:
+    Kolmogorov −5/3 appears as −8/3. The 3D TKE log line compares against
+    −5/3, which assumes E(k). The Dalziel slab spectrum is 1D and is not
+    affected.
   - **2D turbulence_intensity divides by the domain-mean velocity**, which is
     near zero, so the values are meaningless.
   - **2D u_rms and v_rms are taken about the domain mean**, not about the

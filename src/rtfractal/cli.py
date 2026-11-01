@@ -10,13 +10,13 @@ from .pipeline import phase1, phase2, phase3
 
 def _analyze(a):
     if a.legacy:
-        a.offsets, a.ladder, a.trim = 'legacy', 'legacy', 'legacy'
+        a.offsets, a.ladder, a.trim, a.tke = 'legacy', 'legacy', 'legacy', 'legacy'
     case = open_case(a.case)
     out = os.path.abspath(a.output_dir or os.path.join(case.path, 'analysis'))
     be = backend.resolve(a.backend)
     print(f"rtfractal {__version__}: {case.path}\n  format={case.format} dim={case.dim} "
           f"snapshots={len(case.snapshots)} backend={be}\n  {case.physics.summary()}  H0={case.H0}\n"
-          f"  box counting: offsets={a.offsets} ladder={a.ladder} trim={a.trim}")
+          f"  box counting: offsets={a.offsets} ladder={a.ladder} trim={a.trim}  tke spectrum: {a.tke}")
     phases = {int(p) for p in a.phases.split(',')}
     if phases - {1, 2, 3}:
         sys.exit("--phases takes a comma-separated subset of 1,2,3")
@@ -33,7 +33,7 @@ def _analyze(a):
             phase2.run_2d(case, out, times=mf_times, df=df, **box)    # df=None: reads summary/temporal_results.csv
         if 3 in phases:
             print("\nPhase 3: spectra + velocity statistics")
-            phase3.run_2d(case, out, times=mf_times)                 # legacy 2D uses the --mf-times list
+            phase3.run_2d(case, out, times=mf_times, tke=a.tke)      # legacy 2D uses the --mf-times list
     else:
         if 1 in phases:
             print("\nPhase 1: mixing + fractal dimension")
@@ -68,8 +68,10 @@ def main(argv=None):
                    help='largest box: L8 = L/8 (default) or legacy = L/2 (2D), min(L,W)/2 (3D)')
     a.add_argument('--trim', choices=['r2', 'legacy'], default='r2',
                    help='end-point trim test: r2 (default) or legacy (2D always trims both ends)')
+    a.add_argument('--tke', choices=['uv', 'legacy'], default='uv',
+                   help="2D TKE spectrum: uv = spectrum of (u'^2+v'^2)/2 (default) or legacy (u spectrum only)")
     a.add_argument('--legacy', action='store_true',
-                   help='reproduce FractalParameterAI exactly: --offsets legacy --ladder legacy --trim legacy')
+                   help='reproduce FractalParameterAI exactly: --offsets/--ladder/--trim/--tke legacy')
     a.add_argument('--skip-energy', action='store_true', help='3D: skip the PE/BPE/KE budget (no U read)')
     a.set_defaults(func=_analyze)
     args = p.parse_args(argv)

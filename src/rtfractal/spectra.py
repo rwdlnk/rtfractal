@@ -12,7 +12,8 @@ operation, so results are bit-identical to the legacy code.
                           weighted power-law fits over fixed k/k0 bands.
     field_spectrum_2d     full-domain 2-D FFT, log-binned radial average,
                           power-law fit over the middle half of the bins.
-    tke_spectrum_2d       legacy "TKE" spectrum (see its docstring: it is the
+    tke_spectrum_2d       TKE spectrum 1/2(P_u + P_v); mode='legacy' gives the
+                          legacy "TKE" spectrum (see its docstring: it is the
                           u spectrum with the total energy averaged with v).
 
 3D (fields indexed [k_z, j_y, i_x]):
@@ -179,18 +180,26 @@ def radial_average_log(K, power_2d, n_bins=50):
     return np.array(k_binned), np.array(p_binned)
 
 
-def radial_spectrum_2d(field, dx, dy, detrend=True, n_bins=50):
-    """(k [rad/m], E(k)) of a (nx, ny) field: mean removed, optional plane
-    detrend, |FFT|^2 / N, log-binned radial average."""
+def power_2d(field, dx, dy, detrend=True):
+    """(|k| grid [rad/m], |FFT|^2 / N, fluctuation field) of a (nx, ny)
+    field: mean removed, optional plane detrend.  By Parseval,
+    sum(power) / N = mean(fluctuation**2)."""
     fc = field - np.mean(field)
     if detrend:
         fc = detrend_plane(fc)
-    power_2d = np.abs(np.fft.fft2(fc)) ** 2 / field.size
+    pw = np.abs(np.fft.fft2(fc)) ** 2 / field.size
     nx, ny = field.shape
     kx = 2 * np.pi * np.fft.fftfreq(nx, d=dx)
     ky = 2 * np.pi * np.fft.fftfreq(ny, d=dy)
     KX, KY = np.meshgrid(kx, ky, indexing='ij')
-    return radial_average_log(np.sqrt(KX**2 + KY**2), power_2d, n_bins)
+    return np.sqrt(KX**2 + KY**2), pw, fc
+
+
+def radial_spectrum_2d(field, dx, dy, detrend=True, n_bins=50):
+    """(k [rad/m], P(k)) of a (nx, ny) field: mean removed, optional plane
+    detrend, |FFT|^2 / N, log-binned radial average (mean power per mode)."""
+    K, pw, _ = power_2d(field, dx, dy, detrend)
+    return radial_average_log(K, pw, n_bins)
 
 
 def _empty_features():
@@ -255,13 +264,39 @@ def field_spectrum_2d(field, x, y, field_name='field', detrend=True, return_spec
     return out
 
 
-def tke_spectrum_2d(u, v, x, y, detrend=True, u_spec=None, v_spec=None):
-    """Legacy 2D 'TKE spectrum'.
+def tke_spectrum_2d(u, v, x, y, detrend=True, u_spec=None, v_spec=None, mode='uv', return_spectrum=False):
+    """2D TKE spectrum.
 
-    LEGACY QUIRK, reproduced: the result is the u spectrum's features (slope,
-    R^2, dominant wavelength are those of u alone); only total_energy is
-    (E_u + E_v)/2.  Pass precomputed u_spec/v_spec to avoid recomputing them
-    (identical result: the computation is deterministic)."""
+    mode='uv' (default): the radial average of 1/2(P_u + P_v), i.e. the
+    spectrum of TKE per unit mass 1/2(u'^2 + v'^2) (multiply by rho_0 for
+    energy per volume).  Same binning, mean-power-per-mode convention and fit
+    as the u and v spectra, so the three slopes are comparable.
+    total_energy is the exact 1/2(<u'^2> + <v'^2>) of the detrended
+    fluctuations (equal to the Parseval sum of the 2D power), not a trapezoid
+    over the binned spectrum.
+
+    mode='legacy': LEGACY QUIRK, reproduced: the result is the u spectrum's
+    features (slope, R^2, dominant wavelength are those of u alone); only
+    total_energy is (E_u + E_v)/2 of the binned-spectrum trapezoids.  Pass
+    precomputed u_spec/v_spec to avoid recomputing them."""
+    if mode == 'uv':
+        if u.size < 100:
+            return _empty_features()
+        nx, ny = u.shape
+        dx = np.abs(x[1, 0] - x[0, 0]) if nx > 1 else 1.0
+        dy = np.abs(y[0, 1] - y[0, 0]) if ny > 1 else 1.0
+        K, pu, uc = power_2d(u, dx, dy, detrend)
+        _, pv, vc = power_2d(v, dx, dy, detrend)
+        k, power = radial_average_log(K, 0.5 * (pu + pv))
+        out = spectrum_features(k, power, np.array([x.min(), x.max()]))
+        out['total_energy'] = 0.5 * (np.mean(uc ** 2) + np.mean(vc ** 2))
+        out['field_name'] = 'turbulent_kinetic_energy'
+        out['grid_shape'] = u.shape
+        if return_spectrum:
+            out['k'], out['power'] = k, power
+        return out
+    if mode != 'legacy':
+        raise ValueError("mode must be 'uv' or 'legacy'")
     u_spec = field_spectrum_2d(u, x, y, 'u', detrend) if u_spec is None else u_spec
     v_spec = field_spectrum_2d(v, x, y, 'v', detrend) if v_spec is None else v_spec
     out = dict(u_spec)

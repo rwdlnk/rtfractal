@@ -72,9 +72,11 @@ def spectrum_summary_row(sr):
     return row
 
 
-def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print):
-    """Dalziel slab spectrum, 2D radial spectra of F/u/v, legacy TKE spectrum
+def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print, tke='uv'):
+    """Dalziel slab spectrum, 2D radial spectra of F/u/v, the TKE spectrum
     and whole-field velocity statistics at the snapshots nearest `times`.
+    tke='uv' (default): spectrum of 1/2(u'^2 + v'^2); tke='legacy': the
+    legacy u-only spectrum (see spectra.tke_spectrum_2d).
 
     Returns dict(summary=DataFrame, velocity=DataFrame or None,
     results=[per-time dict with 'time', 'tau', 'dalziel_spectrum',
@@ -131,7 +133,8 @@ def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print):
             v_spec = spectra.field_spectrum_2d(data['V'], data['x'], data['y'], 'v', True, return_spectrum=True)
             sr['u_velocity_spectrum'], sr['v_velocity_spectrum'] = u_spec, v_spec
             sr['tke_spectrum'] = spectra.tke_spectrum_2d(data['U'], data['V'], data['x'], data['y'],
-                                                         u_spec=u_spec, v_spec=v_spec)
+                                                         u_spec=u_spec, v_spec=v_spec, mode=tke,
+                                                         return_spectrum=True)
             log(f"    TKE spectrum: slope={sr['tke_spectrum']['power_law_slope']:.3f}, "
                 f"R2={sr['tke_spectrum']['power_law_r_squared']:.3f}")
             vs = velocity.velocity_stats_2d(data['U'], data['V'])
