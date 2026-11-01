@@ -20,5 +20,11 @@ reference values) are in `../RT_ANALYSIS_TOOLS.md`.
   the numpy/scipy builds differ. Don't chase that.
 - **Dev venv:** `.venv` (current numpy/numba). Run `.venv/bin/python -m pytest -q`.
 - **Phases 1–3 are ported** (`pipeline/phase{1,2,3}.py`); `tests/test_phase{2,3}.py`
-  hold their live bit-identity tests (`pytest` takes about 2 minutes).
-  **Not ported yet:** the plots for all phases.
+  hold their live bit-identity tests (`pytest` takes about 3 minutes).
+- **Plots are ported** (`plots/`, `tests/test_plots.py`). They're drawn
+  from files on disk only: the legacy CSVs plus `rtfractal_run.json` and
+  `plotdata/` (`plotdata.py`).
+  - Keep the plot-only data out of the legacy subfolders. The phase-3
+    regression tests compare the full CSV listing of `spectra/` and
+    `velocity/`.
+  - Every D, D_q or f(α) figure must show its box-counting settings.

@@ -5,6 +5,9 @@ Outputs (same layout and columns as the legacy analyzers):
     analysis/profiles/alpha_profile_t<ms>.csv        (+ theta_profile_* in 3D)
     analysis/interfaces/interface_t<ms>.dat          (2D)
     analysis/fractal/boxcount_t<ms>.csv | boxcount_3d_t<t>.csv
+Additive (for the plots, see rtfractal.plotdata):
+    analysis/rtfractal_run.json                       case metadata + box-counting settings
+    analysis/plotdata/field_t<idx>.npz                2D: F at the interface-snapshot times
 """
 import os
 import time
@@ -12,7 +15,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from .. import fractal, interface, mixing
+from .. import fractal, interface, mixing, plotdata
 
 T_SKIP = 0.01          # snapshots before this are the flat initial interface
 _NONDIM = ['ht_geo', 'hb_geo', 'h_total_geo', 'ht_stat', 'hb_stat', 'h_total_stat',
@@ -53,11 +56,15 @@ def run_2d(case, analysis_dir, contour_levels=(0.5,), backend=None, log=print, o
     max_box, min_box, factor = float(xc[-1] - xc[0]) / _ladder_div(ladder), float(xc[1] - xc[0]) * 2, 1.5
     log(f"  box ladder: max={max_box:.6f}, min={min_box:.6f}, factor={factor}")
 
+    pic_times = plotdata.interface_snapshot_targets([s.t for s in case.snapshots])
+    pictures = {id(plotdata.nearest(case.snapshots, t)) for t in pic_times}
     rows = []
     for i, snap in enumerate(case.snapshots):
         tau = float(phys.nondim_time(snap.t))
         log(f"[{i + 1}/{len(case.snapshots)}] t={snap.t:.3f} s (tau={tau:.4f})")
         data = first if i == 0 else case.read_2d(snap)
+        if id(snap) in pictures:
+            plotdata.save_field_snapshot(analysis_dir, data, snap.t, tau, H0, snap.time_idx)
         f_avg, yv = np.mean(data['f'], axis=0), data['y'][0, :]
         pd.DataFrame({'y_m': yv, 'alpha_mean': f_avg}).to_csv(
             os.path.join(analysis_dir, 'profiles', f'alpha_profile_t{snap.time_idx:05d}.csv'), index=False)
@@ -124,6 +131,8 @@ def run_2d(case, analysis_dir, contour_levels=(0.5,), backend=None, log=print, o
     out = os.path.join(analysis_dir, 'summary', 'temporal_results.csv')
     df.to_csv(out, index=False)
     log(f"Temporal results saved to {out}")
+    plotdata.record_run(analysis_dir, case, 1, offsets=offsets, ladder=ladder, trim=trim,
+                        contour_levels=contour_levels)
     return df
 
 
@@ -216,6 +225,7 @@ def run_3d(case, analysis_dir, energy=True, backend=None, log=print, offsets='co
     out = os.path.join(analysis_dir, 'summary', 'temporal_results.csv')
     df.to_csv(out, index=False)
     log(f"Temporal results saved to {out}")
+    plotdata.record_run(analysis_dir, case, 1, offsets=offsets, ladder=ladder, trim=trim, energy=bool(energy))
     return df
 
 

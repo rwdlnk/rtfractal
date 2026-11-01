@@ -18,8 +18,11 @@ on numba CPU threads, with identical results.
 
 With `--legacy`, each phase is bit-identical to the legacy code. The one
 exception is the legacy 3D multifractal GPU path, which isn't reproducible
-itself; rtfractal matches its deterministic CPU path. The plots are not
-ported yet; use the legacy analyzers for those.
+itself; rtfractal matches its deterministic CPU path.
+
+The legacy figures are ported too (`rtfractal/plots/`, see "Plots"). They
+are drawn after each phase and can be redrawn from a finished analysis
+folder with `rtfractal plot`.
 
 ## Install
 
@@ -41,6 +44,17 @@ rtfractal analyze CASE --contour-levels 0.1,0.5,0.9     # 2D
 rtfractal analyze CASE --skip-energy                     # 3D: don't read U
 rtfractal analyze CASE --legacy                          # reproduce FractalParameterAI numbers exactly
 rtfractal analyze CASE --offsets legacy|covering --ladder legacy|L8 --trim legacy|r2   # individually
+rtfractal analyze CASE --tke uv|legacy                   # 2D TKE spectrum: of (u'^2+v'^2)/2 (default) or u only
+rtfractal analyze CASE --spectrum E|P                    # radial spectra: ring-integrated E(k) (default) or legacy P(k)
+rtfractal analyze CASE --no-plots                        # data files only; --dpi N (default 300)
+
+rtfractal plot CASE/analysis                # redraw every figure from the folder, no recomputation
+rtfractal plot CASE                         # same (a case folder means CASE/analysis)
+rtfractal plot ANALYSIS --phases 1,3 --output-dir FIGS   # subset; figures elsewhere (same subfolders)
+rtfractal plot ANALYSIS --case CASE         # case for field figures if plotdata/ is absent (default:
+                                            # rtfractal_run.json, else the folder's parent)
+rtfractal plot OLD/analysis --assume-settings legacy     # label D figures of a folder that did not
+                                                         # record its box-counting settings
 ```
 
 The output layout and the columns of `analysis/summary/temporal_results.csv`
@@ -60,6 +74,8 @@ case = open_case('path/to/case')        # case.dim, case.physics, case.snapshots
 df = phase1.run_2d(case, 'out')         # or phase1.run_3d
 phase2.run_2d(case, 'out', df=df)       # multifractal; or phase2.run_3d
 phase3.run_2d(case, 'out')              # spectra + velocity; or phase3.run_3d
+from rtfractal.plots import plot_phase1, plot_phase2, plot_phase3, plot_all
+plot_all(case, 'out')                   # case may be None for a folder written by rtfractal
 ```
 
 ## Layout
@@ -73,11 +89,92 @@ interface.py  contours -> segments      mixing.py  widths, Theta, energy budget
 fractal.py    D of contours, surfaces, projections
 multifractal.py  tau(q), D_q, f(alpha)  spectra.py  Dalziel slab, radial, TKE spectra
 velocity.py   velocity statistics       pipeline/phase1.py, phase2.py, phase3.py      cli.py
+plotdata.py   rtfractal_run.json + plotdata/ (the small extra files the plots need)
+plots/        common.py (metadata, settings labels, Agg figures), phase1.py, phase2.py, phase3.py
 ```
+
+## Plots
+
+`rtfractal analyze` draws the legacy figure set after each phase (unless
+`--no-plots`), with the legacy file names and subfolders:
+- **Phase 1, 2D** (`summary/`): mixing_evolution, mixing_self_similar,
+  fractal_dimension_evolution, combined_evolution, D_and_dh_dtau,
+  dalziel_integral_measures, interface_snapshots.
+- **Phase 1, 3D** (`summary/`): mixing_evolution_3d, selfsimilar_scaling_3d,
+  fractal_evolution_3d, dalziel_integrals_3d, surface_complexity_3d.
+- **Phase 2, 2D** (`multifractal/`): f_alpha_evolution_overlay,
+  Dq_evolution_overlay, D012_vs_tau, multifractality_measures,
+  phase_portrait, plus multifractal_dimensions, multifractal_spectrum and
+  multifractal_r_squared in each `parameter_<t>`/`time_<t>` folder.
+- **Phase 2, 3D** (`multifractal/`): f_alpha_evolution_3d, Dq_evolution_3d,
+  D012_vs_tau_3d, multifractality_measures_3d, phase_portrait_D0_h_3d.
+- **Phase 3, 2D**: `velocity/` velocity_statistics_evolution,
+  velocity_field_snapshots; `spectra/` dalziel_slope_evolution,
+  dalziel_spectra_snapshots, spectrum_evolution, spectrum_t<t> (early, mid,
+  late). The legacy 3D analyzer draws no phase-3 figures, and neither does
+  rtfractal.
+
+The SOLA-VOF and OpenFOAM plotting duplicates of `analyze_rt.py` are merged
+into one path. Not ported: dimensions_evolution, multifractal_params_evolution
+and Dq_evolution_3D, which some old SOLA-VOF folders hold. They came from
+`RTAnalyzer.analyze_multifractal_evolution`, which `analyze_rt.py` never calls.
+
+**Data the plots read.** All figures are drawn from files on disk. Three
+small additions to the legacy layout make that possible (`plotdata.py`):
+- `analysis/rtfractal_run.json`: the case metadata and, per phase, the
+  settings it ran with.
+- `analysis/plotdata/field_t*.npz` and `velocity_t*.npz` (2D): the picture
+  fields. They're strided to at most 1000 cells per axis, as float32.
+- `analysis/plotdata/radial_spectra_t*.csv` (2D): the binned radial spectra.
+
+A legacy-analyzer folder has none of these. Its field figures are then read
+from the case.
+
+**Box-counting settings are on every D, D_q and f(α) figure**, as a title
+tag (e.g. `[covering offsets, L/8, R² trim]` or `[LEGACY box counting: ...]`)
+and a footnote. They come from `rtfractal_run.json`. Folders without one are
+labelled "settings not recorded", unless `--assume-settings` is given; the
+label then says "assumed".
+
+**Deliberate differences from the legacy figures** (content, not style):
+- **Front labels:** ht is labelled as the bubble (upper) front and hb as the
+  spike (lower) front. The legacy OpenFOAM 2D and 3D figures had them swapped.
+- **3D degree of multifractality:** labelled max D_q − min D_q, which is
+  what both codes compute. Legacy labelled it D₋₅ − D₅.
+- **Per-time D(q) figures** also show the raw D_q (before the concavity
+  projection). They state when the projection collapsed τ(q) for q ≥ 0.
+- **spectrum_t<t>:** shows the spectrum the slope was actually fitted to
+  (mean and plane removed), with the actual fit line. Legacy recomputed the
+  spectrum without the plane detrend and drew the detrended slope through it.
+- **2D radial spectra are drawn in the convention they were computed
+  in**, read from the column names.
+  - E(k) (default): reference slopes −5/3 and −3.
+  - P(k) (`--spectrum P`): the reference slopes are the P(k) equivalents,
+    −8/3 and −4.
+  - Legacy drew −5/3 and −3 against P(k). The 1D Dalziel slab figure keeps
+    −5/3.
+- **TKE curves** are labelled with the `--tke` mode: "½(u²+v²) spectrum",
+  or "legacy: u only".
+- **Vorticity panels** use 21 symmetric levels over ±(98th percentile).
+  Legacy's levels spanned the full range despite vmin/vmax.
+- **D_and_dh_dtau** omits the two end points of the 3-point running mean,
+  which legacy averaged against zero padding.
+- **The 2D conservation panels** widen their legacy ±0.002 zoom when the
+  data leave it.
+- **dalziel_integral_measures** is now drawn for OpenFOAM 2D cases too.
+
+**Reproduced as legacy, still worth knowing:**
+- **2D α_RT fits** use τ > 0.3 τ_max with no wall guard (the 3D fit has
+  one). The figure now says so.
+- **Dalziel's τ = 2 benchmark slopes** are compared with a horizontal
+  concentration spectrum taken from a 2D simulation.
+- **2D u_rms and v_rms** are taken about the domain mean.
+- **The VOF "total spectral energy"** is a trapezoid over log-bin averages.
+  Its magnitude has no physical meaning.
 
 ## Verification
 
-`pytest` (71 tests; `tests/test_phase2.py` and `test_phase3.py` for phases 2–3) covers:
+`pytest` (79 tests; `tests/test_phase2.py` and `test_phase3.py` for phases 2–3, `test_plots.py` for the figures) covers:
 - **Unit tests:** exact power laws, a Koch curve, flat planes, CPU = CUDA
   counts, reader round trips.
 - **Regression tests:** each runs the legacy code in-process and requires
