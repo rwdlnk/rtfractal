@@ -2,8 +2,9 @@
 
 Ported from FractalParameterAI ``analyze_rt.py`` (run_phase3 /
 _run_phase3_openfoam, which are identical apart from the reader) and
-``analyze_rt_3d.py`` (run_phase3).  Data outputs only; the legacy plots are
-not ported.  Outputs (same names and columns as the legacy analyzers):
+``analyze_rt_3d.py`` (run_phase3).  Data outputs only; the plots are drawn
+from them by rtfractal.plots.phase3.  Outputs (same names and columns as the
+legacy analyzers):
 
 2D  analysis/spectra/dalziel_pk_t<ms>.csv        k_over_k0, power
     analysis/spectra/spectrum_summary.csv        one row per time
@@ -12,6 +13,10 @@ not ported.  Outputs (same names and columns as the legacy analyzers):
     analysis/spectra/tke_spectrum_3d_t<t:.2f>.csv k_over_k0, E_u, E_v, E_w, E_tke
     analysis/spectra/spectrum_summary_3d.csv, tke_spectrum_summary_3d.csv
     analysis/velocity/velocity_profile_t<t:.2f>.csv, velocity_summary_3d.csv
+Additive (for the plots, see rtfractal.plotdata):
+    analysis/rtfractal_run.json                    phase-3 times
+2D  analysis/plotdata/radial_spectra_t<ms>.csv    k, E_F[, E_u, E_v]
+    analysis/plotdata/velocity_t<idx>.npz         |V| and vorticity at the picture times
 
 Time selection follows the legacy code:
 - target times above (last snapshot time + 0.5 s) are dropped;
@@ -27,7 +32,7 @@ import time as _time
 import numpy as np
 import pandas as pd
 
-from .. import spectra, velocity
+from .. import plotdata, spectra, velocity
 from ..io.case import Snapshot
 
 DEFAULT_TIMES_2D = (2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0)          # legacy --mf-times
@@ -100,12 +105,20 @@ def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print, tke='uv'):
     log(f"  Dalziel slab anchored at initial interface y0={y0_init:.4f} m, "
         f"H={H_domain:.4f} m, slab=[{y0_init - 0.1 * H_domain:.4f}, {y0_init:.4f}] m")
 
+    # velocity_field_snapshots.png pictures (legacy times, from the snapshots actually used)
+    used = [min(case.snapshots, key=lambda s: abs(s.t - tt)) for tt in times]
+    pictures = {id(plotdata.nearest(case.snapshots, tt)): None
+                for tt in plotdata.velocity_snapshot_targets([s.t for s in used])}
+
     results, vel_rows = [], []
     for target_t in times:
         snap = min(case.snapshots, key=lambda s: abs(s.t - target_t))
         data = case.read_2d(snap, fields=('F', 'U', 'V'))
         t = snap.t
         tau = float(phys.nondim_time(t))
+        if id(snap) in pictures and pictures[id(snap)] is None:
+            plotdata.save_velocity_snapshot(analysis_dir, data, t, tau, snap.time_idx)
+            pictures[id(snap)] = True
         log(f"\n  t={t:.3f} s (tau={tau:.4f})")
         sr = {'time': t, 'tau': tau}
 
@@ -144,7 +157,13 @@ def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print, tke='uv'):
                 'velocity_mag_max', 'velocity_mag_mean')}})
             log(f"    Velocity: u_rms={vs['u_rms']:.4e}, v_rms={vs['v_rms']:.4e}, "
                 f"TKE={vs['TKE']:.4e}, |V|_max={vs['velocity_mag_max']:.4e}")
+        plotdata.save_radial_spectra(analysis_dir, sr)
         results.append(sr)
+
+    for snap in case.snapshots:                 # picture times not among the phase-3 times
+        if id(snap) in pictures and pictures[id(snap)] is None:
+            plotdata.save_velocity_snapshot(analysis_dir, case.read_2d(snap, fields=('F', 'U', 'V')), snap.t,
+                                            float(phys.nondim_time(snap.t)), snap.time_idx)
 
     vel_df = None
     if vel_rows:
@@ -154,6 +173,7 @@ def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print, tke='uv'):
     out = os.path.join(spectra_dir, 'spectrum_summary.csv')
     summary.to_csv(out, index=False)
     log(f"Spectrum summary saved to {out}")
+    plotdata.record_run(analysis_dir, case, 3, times=list(times), tke=tke)
     return {'summary': summary, 'velocity': vel_df, 'results': results}
 
 
@@ -261,4 +281,5 @@ def run_3d(case, analysis_dir, times=DEFAULT_TIMES_3D, log=print):
             out[key] = pd.DataFrame(rows)
             out[key].to_csv(os.path.join(d, name), index=False)
             log(f"  Wrote {name} ({len(rows)} timesteps)")
+    plotdata.record_run(analysis_dir, case, 3, times=list(times))
     return out

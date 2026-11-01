@@ -35,6 +35,8 @@ on disk:
       legacy fallbacks are reproduced: 2D extent/2 -> 0.001 m by 1.5; 3D the
       fractal3d surface-feature heuristic (suggest_parameters).
 offsets='covering' (default) | 'legacy' applies to phase 2's counting as well.
+
+The settings are recorded in analysis/rtfractal_run.json (rtfractal.plotdata).
 """
 import csv
 import os
@@ -43,7 +45,7 @@ import time
 import numpy as np
 import pandas as pd
 
-from .. import fractal, interface, multifractal
+from .. import fractal, interface, multifractal, plotdata
 from .phase1 import _ladder_div
 
 MF_TIMES = (2.0, 4.0, 6.0, 8.0, 10.0, 12.0, 14.0, 16.0, 18.0)
@@ -146,6 +148,8 @@ def run_2d(case, analysis_dir, times=MF_TIMES, q_values=multifractal.Q_DEFAULT, 
                                       'degree_multifractality'])
     out.to_csv(os.path.join(mf_dir, 'multifractal_summary.csv'), index=False)
     log(f"Multifractal summary saved to {mf_dir}")
+    plotdata.record_run(analysis_dir, case, 2, offsets=offsets, ladder=ladder, trim=trim, times=list(times),
+                        q=[float(q) for q in q_values])
     return out
 
 
@@ -312,4 +316,6 @@ def run_3d(case, analysis_dir, times=MF_TIMES, q_values=multifractal.Q_DEFAULT, 
     out = pd.DataFrame(rows)
     out.to_csv(os.path.join(mf_dir, 'multifractal_summary_3d.csv'), index=False)
     log(f"Multifractal summary saved to {mf_dir}")
+    plotdata.record_run(analysis_dir, case, 2, offsets=offsets, ladder=ladder, trim=trim, times=list(times),
+                        q=[float(q) for q in q_values], measure=measure)
     return out
