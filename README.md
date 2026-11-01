@@ -180,12 +180,20 @@ offsets, ladder and trim. These are things to know before quoting values.
     took the slope, R² and dominant wavelength from u alone, and its
     total_energy was a trapezoid over binned power, off by orders of
     magnitude.
-  - **All radial spectra (2D fields, 3D horizontal slabs) are mean power per
-    mode P(k), not ring-integrated E(k).** In a 2D wavenumber plane
-    E(k) ∝ k·P(k), so a P(k) slope is one steeper than the E(k) slope:
-    Kolmogorov −5/3 appears as −8/3. The 3D TKE log line compares against
-    −5/3, which assumes E(k). The Dalziel slab spectrum is 1D and is not
-    affected.
+  - **Fixed (default `--spectrum E`): radial spectra are ring-integrated
+    E(k).** This applies to the 2D full-domain spectra and the 3D horizontal
+    slab spectra. Legacy (`--spectrum P`, included in `--legacy`) wrote mean
+    power per mode, P(k), even under the 3D column names `E_u … E_tke`.
+    - In a 2D wavenumber plane E(k) ∝ k·P(k), so E slopes are P slopes + 1.
+      Kolmogorov −5/3 and Bolgiano–Obukhov −11/5 refer to E(k).
+    - E(k) output names say so:
+      - 2D: `<field>_slope_E`, `_R2_E`, `_dom_wavelength_E`.
+      - 3D files: `spectrum_E_3d_t*.csv` (column `E`) and
+        `tke_spectrum_E_3d_t*.csv`.
+      - 3D summaries: `*_slope_E_<band>`.
+    - Old scripts reading legacy names fail loudly instead of misreading.
+    - `<field>_total_energy` is now the exact variance (TKE for `tke`).
+    - The Dalziel slab spectrum is 1D and is unchanged.
   - **2D turbulence_intensity divides by the domain-mean velocity**, which is
     near zero, so the values are meaningless.
   - **2D u_rms and v_rms are taken about the domain mean**, not about the

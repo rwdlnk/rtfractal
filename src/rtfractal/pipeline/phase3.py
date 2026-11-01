@@ -13,6 +13,18 @@ not ported.  Outputs (same names and columns as the legacy analyzers):
     analysis/spectra/spectrum_summary_3d.csv, tke_spectrum_summary_3d.csv
     analysis/velocity/velocity_profile_t<t:.2f>.csv, velocity_summary_3d.csv
 
+Radial-spectrum convention (spectrum='E' default, 'P' legacy; see
+spectra.py).  With the default, names say E(k) explicitly:
+2D  spectrum_summary.csv: <field>_slope_E, <field>_R2_E,
+    <field>_dom_wavelength_E, <field>_total_energy (exact variance; TKE for
+    tke); the dalziel_* columns are unchanged (1-D spectrum).
+3D  spectra/spectrum_E_3d_t<t>.csv (k_over_k0, E),
+    spectra/tke_spectrum_E_3d_t<t>.csv (k_over_k0, E_u, E_v, E_w, E_tke),
+    spectrum_summary_3d.csv vof_slope_E_<band>, vof_r2_E_<band>,
+    tke_spectrum_summary_3d.csv <comp>_slope_E_<band>, <comp>_r2_E_<band>.
+With spectrum='P' the legacy names above are written (P(k) values, including
+the legacy 'E_*' columns of tke_spectrum_3d_t<t>.csv).
+
 Time selection follows the legacy code:
 - target times above (last snapshot time + 0.5 s) are dropped;
 - 2D uses the nearest snapshot to each target (so two targets can pick the
@@ -49,8 +61,11 @@ def clamp_times(case, times):
 
 # ─── 2D ──────────────────────────────────────────────────────────────────────
 
-def spectrum_summary_row(sr):
-    """One spectrum_summary.csv row (legacy column order) from a per-time result."""
+def spectrum_summary_row(sr, spectrum='E'):
+    """One spectrum_summary.csv row (legacy column order) from a per-time
+    result.  spectrum='E' suffixes the radial-spectrum slope, R^2 and
+    dominant-wavelength columns with _E; 'P' gives the legacy names."""
+    sfx = '' if spectrum == 'P' else '_E'
     row = {'time': sr['time'], 'tau': sr['tau']}
     if 'dalziel_spectrum' in sr:
         ds = sr['dalziel_spectrum']
@@ -65,18 +80,19 @@ def spectrum_summary_row(sr):
     for key in ['vof_spectrum', 'u_velocity_spectrum', 'v_velocity_spectrum', 'tke_spectrum']:
         if key in sr:
             prefix = key.replace('_spectrum', '')
-            row[f'{prefix}_slope'] = sr[key]['power_law_slope']
-            row[f'{prefix}_R2'] = sr[key]['power_law_r_squared']
-            row[f'{prefix}_dom_wavelength'] = sr[key]['dominant_wavelength']
+            row[f'{prefix}_slope{sfx}'] = sr[key]['power_law_slope']
+            row[f'{prefix}_R2{sfx}'] = sr[key]['power_law_r_squared']
+            row[f'{prefix}_dom_wavelength{sfx}'] = sr[key]['dominant_wavelength']
             row[f'{prefix}_total_energy'] = sr[key]['total_energy']
     return row
 
 
-def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print, tke='uv'):
+def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print, tke='uv', spectrum='E'):
     """Dalziel slab spectrum, 2D radial spectra of F/u/v, the TKE spectrum
     and whole-field velocity statistics at the snapshots nearest `times`.
     tke='uv' (default): spectrum of 1/2(u'^2 + v'^2); tke='legacy': the
-    legacy u-only spectrum (see spectra.tke_spectrum_2d).
+    legacy u-only spectrum (see spectra.tke_spectrum_2d).  spectrum='E'
+    (default) or 'P' selects the radial-spectrum convention (module notes).
 
     Returns dict(summary=DataFrame, velocity=DataFrame or None,
     results=[per-time dict with 'time', 'tau', 'dalziel_spectrum',
@@ -123,18 +139,21 @@ def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print, tke='uv'):
             pd.DataFrame({'k_over_k0': ds['k_over_k0'], 'power': ds['power']}).to_csv(
                 os.path.join(spectra_dir, f'dalziel_pk_t{int(round(t * 1000))}.csv'), index=False)
 
-        vof = spectra.field_spectrum_2d(data['f'], data['x'], data['y'], 'F', True, return_spectrum=True)
+        vof = spectra.field_spectrum_2d(data['f'], data['x'], data['y'], 'F', True, return_spectrum=True,
+                                        spectrum=spectrum)
         sr['vof_spectrum'] = vof
         log(f"    [2D-radial] slope={vof['power_law_slope']:.3f}, R2={vof['power_law_r_squared']:.3f}, "
             f"lambda_dom={vof['dominant_wavelength']:.4f}")
 
         if 'U' in data and 'V' in data:
-            u_spec = spectra.field_spectrum_2d(data['U'], data['x'], data['y'], 'u', True, return_spectrum=True)
-            v_spec = spectra.field_spectrum_2d(data['V'], data['x'], data['y'], 'v', True, return_spectrum=True)
+            u_spec = spectra.field_spectrum_2d(data['U'], data['x'], data['y'], 'u', True, return_spectrum=True,
+                                               spectrum=spectrum)
+            v_spec = spectra.field_spectrum_2d(data['V'], data['x'], data['y'], 'v', True, return_spectrum=True,
+                                               spectrum=spectrum)
             sr['u_velocity_spectrum'], sr['v_velocity_spectrum'] = u_spec, v_spec
             sr['tke_spectrum'] = spectra.tke_spectrum_2d(data['U'], data['V'], data['x'], data['y'],
                                                          u_spec=u_spec, v_spec=v_spec, mode=tke,
-                                                         return_spectrum=True)
+                                                         return_spectrum=True, spectrum=spectrum)
             log(f"    TKE spectrum: slope={sr['tke_spectrum']['power_law_slope']:.3f}, "
                 f"R2={sr['tke_spectrum']['power_law_r_squared']:.3f}")
             vs = velocity.velocity_stats_2d(data['U'], data['V'])
@@ -150,7 +169,7 @@ def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print, tke='uv'):
     if vel_rows:
         vel_df = pd.DataFrame(vel_rows)
         vel_df.to_csv(os.path.join(velocity_dir, 'velocity_statistics.csv'), index=False)
-    summary = pd.DataFrame([spectrum_summary_row(sr) for sr in results])
+    summary = pd.DataFrame([spectrum_summary_row(sr, spectrum) for sr in results])
     out = os.path.join(spectra_dir, 'spectrum_summary.csv')
     summary.to_csv(out, index=False)
     log(f"Spectrum summary saved to {out}")
@@ -164,7 +183,7 @@ def legacy_time_dir(case_path, t):
     return os.path.join(case_path, str(int(t)) if t == int(t) else f"{t}")
 
 
-def run_3d(case, analysis_dir, times=DEFAULT_TIMES_3D, log=print):
+def run_3d(case, analysis_dir, times=DEFAULT_TIMES_3D, log=print, spectrum='E'):
     """Slab concentration spectrum, slab velocity/TKE spectra and horizontal
     velocity statistics (profiles + values at H0) at each target time.
 
@@ -182,6 +201,8 @@ def run_3d(case, analysis_dir, times=DEFAULT_TIMES_3D, log=print):
         log("WARNING: No Phase 3 times within data range. Skipping.")
         return None
 
+    spectra._check_convention(spectrum)
+    sfx, fsfx = ('', '') if spectrum == 'P' else ('_E', '_E')
     spec_rows, tke_rows, vel_rows, results = [], [], [], []
     for target_t in times:
         t0 = _time.time()
@@ -200,18 +221,18 @@ def run_3d(case, analysis_dir, times=DEFAULT_TIMES_3D, log=print):
                 log(f"  WARNING: no {snap.path}/alpha.water; skipping t={target_t}"
                     + (" (decomposed case: run reconstructPar)" if decomposed else ""))
             if alpha is not None:
-                spec = spectra.horizontal_spectrum_3d(alpha, y, H0, H, g3.dx, g3.dz)
+                spec = spectra.horizontal_spectrum_3d(alpha, y, H0, H, g3.dx, g3.dz, spectrum=spectrum)
                 if spec is not None:
                     res['spectrum'] = spec
                     row = {'time': target_t, 'tau': tau, 'n_slab_rows': spec['n_slab_rows']}
                     for band in ['10_25', '10_50']:
-                        row[f'vof_slope_{band}'] = spec.get(f'slope_{band}', np.nan)
-                        row[f'vof_r2_{band}'] = spec.get(f'r2_{band}', np.nan)
+                        row[f'vof_slope{sfx}_{band}'] = spec.get(f'slope_{band}', np.nan)
+                        row[f'vof_r2{sfx}_{band}'] = spec.get(f'r2_{band}', np.nan)
                     spec_rows.append(row)
-                    pd.DataFrame({'k_over_k0': spec['k_over_k0'], 'P': spec['P']}).to_csv(
-                        os.path.join(spec_dir, f'spectrum_3d_t{target_t:.2f}.csv'), index=False)
-                    log(f"    spectrum: slope_10_25={row['vof_slope_10_25']:.3f}, "
-                        f"slope_10_50={row['vof_slope_10_50']:.3f}")
+                    pd.DataFrame({'k_over_k0': spec['k_over_k0'], spectrum: spec[spectrum]}).to_csv(
+                        os.path.join(spec_dir, f'spectrum{fsfx}_3d_t{target_t:.2f}.csv'), index=False)
+                    log(f"    spectrum {spectrum}(k): slope_10_25={row[f'vof_slope{sfx}_10_25']:.3f}, "
+                        f"slope_10_50={row[f'vof_slope{sfx}_10_50']:.3f}")
                 del alpha
 
             U = None
@@ -233,20 +254,22 @@ def run_3d(case, analysis_dir, times=DEFAULT_TIMES_3D, log=print):
                 log(f"    velocity: v'/u'={vel['anisotropy_v_over_u']:.2f}, "
                     f"v_rms={vel['v_rms_centreline']:.4f} m/s")
 
-                tke = spectra.tke_spectrum_3d(U, y, H0, H, g3.dx, g3.dz)
+                tke = spectra.tke_spectrum_3d(U, y, H0, H, g3.dx, g3.dz, spectrum=spectrum)
                 if tke is not None:
                     res['tke'] = tke
                     trow = {'time': target_t, 'tau': tau, 'n_slab_rows': tke['n_slab_rows']}
                     for comp in ('u', 'v', 'w', 'tke'):
                         for band in ('10_25', '10_50', '5_50'):
-                            trow[f'{comp}_slope_{band}'] = tke.get(f'{comp}_slope_{band}', np.nan)
-                            trow[f'{comp}_r2_{band}'] = tke.get(f'{comp}_r2_{band}', np.nan)
+                            trow[f'{comp}_slope{sfx}_{band}'] = tke.get(f'{comp}_slope_{band}', np.nan)
+                            trow[f'{comp}_r2{sfx}_{band}'] = tke.get(f'{comp}_r2_{band}', np.nan)
                     tke_rows.append(trow)
-                    pd.DataFrame({'k_over_k0': tke['k_over_k0'], 'E_u': tke['E_u'], 'E_v': tke['E_v'],
-                                  'E_w': tke['E_w'], 'E_tke': tke['E_tke']}).to_csv(
-                        os.path.join(spec_dir, f'tke_spectrum_3d_t{target_t:.2f}.csv'), index=False)
-                    log(f"    TKE spectrum: slope_10_50={trow['tke_slope_10_50']:.3f} "
-                        f"(R2={trow['tke_r2_10_50']:.2f})  [KO -1.67, BO -2.20]")
+                    # Legacy wrote P(k) under 'E_*' names; keep that only for spectrum='P'.
+                    pd.DataFrame({'k_over_k0': tke['k_over_k0'],
+                                  **{f'E_{c}': tke[f'{spectrum}_{c}'] for c in ('u', 'v', 'w', 'tke')}}).to_csv(
+                        os.path.join(spec_dir, f'tke_spectrum{fsfx}_3d_t{target_t:.2f}.csv'), index=False)
+                    ref = '[KO -1.67, BO -2.20]' if spectrum == 'E' else '[P(k): KO -2.67, BO -3.20]'
+                    log(f"    TKE spectrum {spectrum}(k): slope_10_50={trow[f'tke_slope{sfx}_10_50']:.3f} "
+                        f"(R2={trow[f'tke_r2{sfx}_10_50']:.2f})  {ref}")
                 del U
         except Exception as e:
             log(f"  WARNING: Phase 3 failed at t={target_t:.2f}: {e}")

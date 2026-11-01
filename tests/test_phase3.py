@@ -119,7 +119,7 @@ def test_field_spectrum_recovers_power_law():
     amp = np.where(K > 0, K, 1.0) ** (-beta / 2) * (K > 0)
     f = np.real(np.fft.ifft2(amp * np.exp(2j * np.pi * rng.uniform(size=(n, n)))))
     x, y = _grid(n, n)
-    r = spectra.field_spectrum_2d(f, x, y, detrend=False)
+    r = spectra.field_spectrum_2d(f, x, y, detrend=False, spectrum='P')      # power per mode ~ k^-beta
     assert abs(r['power_law_slope'] + beta) < 0.15 and r['power_law_r_squared'] > 0.95
 
 
@@ -127,8 +127,9 @@ def test_tke_spectrum_2d_legacy_quirk():
     x, y = _grid(64, 64)
     u = np.sin(2 * np.pi * 3 * x) * np.cos(2 * np.pi * 2 * y)
     v = np.sin(2 * np.pi * 7 * y)
-    us, vs = spectra.field_spectrum_2d(u, x, y, 'u'), spectra.field_spectrum_2d(v, x, y, 'v')
-    t = spectra.tke_spectrum_2d(u, v, x, y, mode='legacy')
+    us, vs = (spectra.field_spectrum_2d(u, x, y, 'u', spectrum='P'),
+              spectra.field_spectrum_2d(v, x, y, 'v', spectrum='P'))
+    t = spectra.tke_spectrum_2d(u, v, x, y, mode='legacy', spectrum='P')
     assert t['power_law_slope'] == us['power_law_slope'] and t['dominant_wavelength'] == us['dominant_wavelength']
     assert t['total_energy'] == (us['total_energy'] + vs['total_energy']) / 2
 
@@ -139,8 +140,8 @@ def test_tke_spectrum_2d_uses_u_and_v():
     x, y = _grid(64, 64)
     u = 0.1 * np.sin(2 * np.pi * 3 * x)                 # weak, large scale
     v = np.sin(2 * np.pi * 9 * y)                       # dominant, smaller scale
-    t = spectra.tke_spectrum_2d(u, v, x, y, detrend=False, return_spectrum=True)
-    vs = spectra.field_spectrum_2d(v, x, y, 'v', detrend=False)
+    t = spectra.tke_spectrum_2d(u, v, x, y, detrend=False, return_spectrum=True, spectrum='P')
+    vs = spectra.field_spectrum_2d(v, x, y, 'v', detrend=False, spectrum='P')
     assert t['dominant_wavelength'] == pytest.approx(vs['dominant_wavelength'])
     uc, vc = u - u.mean(), v - v.mean()
     assert t['total_energy'] == pytest.approx(0.5 * (np.mean(uc ** 2) + np.mean(vc ** 2)), rel=1e-12)
@@ -149,6 +150,34 @@ def test_tke_spectrum_2d_uses_u_and_v():
     assert np.sum(0.5 * (pu + pv)) / u.size == pytest.approx(t['total_energy'], rel=1e-12)
     k, p = spectra.radial_average_log(K, 0.5 * (pu + pv))
     assert np.array_equal(t['k'], k) and np.array_equal(t['power'], p)
+
+
+def test_E_spectrum_is_ring_integrated():
+    """E(k) = 2 pi k P(k) (scaled): slopes are P slopes + 1 exactly, the peak
+    moves to E's maximum, and integral E dk approximates the variance."""
+    n, beta = 128, 3.0
+    rng = np.random.default_rng(7)
+    k = np.fft.fftfreq(n) * n
+    K = np.sqrt(k[None, :] ** 2 + k[:, None] ** 2)
+    amp = np.where(K > 0, K, 1.0) ** (-beta / 2) * (K > 0)
+    f = np.real(np.fft.ifft2(amp * np.exp(2j * np.pi * rng.uniform(size=(n, n)))))
+    x, y = _grid(n, n)
+    P = spectra.field_spectrum_2d(f, x, y, detrend=False, return_spectrum=True, spectrum='P')
+    E = spectra.field_spectrum_2d(f, x, y, detrend=False, return_spectrum=True, spectrum='E')
+    assert E['power_law_slope'] == pytest.approx(P['power_law_slope'] + 1, abs=1e-9)
+    assert np.allclose(E['power'], spectra.to_E_2d(P['k'], P['power'], 1 / n, 1 / n))
+    assert E['total_energy'] == pytest.approx(np.mean((f - f.mean()) ** 2), rel=1e-12)
+    assert spectra._trapezoid(E['power'], E['k']) == pytest.approx(E['total_energy'], rel=0.3)
+    ny = 20
+    alpha = np.repeat(f[:, None, :], ny, axis=1)
+    yc = (np.arange(ny) + 0.5) / ny
+    s3P = spectra.horizontal_spectrum_3d(alpha, yc, 0.5, 1.0, 0.4 / n, 0.4 / n, spectrum='P')
+    s3E = spectra.horizontal_spectrum_3d(alpha, yc, 0.5, 1.0, 0.4 / n, 0.4 / n)
+    assert s3E['slope_10_50'] == pytest.approx(s3P['slope_10_50'] + 1, abs=1e-9)
+    U = np.stack([alpha, alpha, alpha], axis=-1)
+    tE = spectra.tke_spectrum_3d(U, yc, 0.5, 1.0, 0.4 / n, 0.4 / n)
+    assert 'E_tke' in tE and 'P_tke' not in tE and tE['spectrum'] == 'E'
+    assert tE['tke_slope_10_50'] == pytest.approx(s3E['slope_10_50'], abs=1e-9)
 
 
 def test_fit_bands_exact():
@@ -169,13 +198,13 @@ def test_horizontal_spectrum_3d_power_law():
     f2 = np.real(np.fft.ifft2(amp * np.exp(2j * np.pi * rng.uniform(size=(nz, nx)))))   # periodic: no padding
     alpha = np.repeat(f2[:, None, :], ny, axis=1)
     yc = (np.arange(ny) + 0.5) / ny
-    s = spectra.horizontal_spectrum_3d(alpha, yc, 0.5, 1.0, L / nx, L / nz)
+    s = spectra.horizontal_spectrum_3d(alpha, yc, 0.5, 1.0, L / nx, L / nz, spectrum='P')
     assert s['n_slab_rows'] == 2 and len(s['P']) == 64
     assert np.isclose(s['k_over_k0'][0], 0.5)                # bin centres in mode numbers
     assert abs(s['slope_10_50'] + beta) < 0.15 and s['r2_10_50'] > 0.98
     U = np.stack([alpha, 2 * alpha, 0 * alpha], axis=-1)
-    t = spectra.tke_spectrum_3d(U, yc, 0.5, 1.0, L / nx, L / nz)
-    assert np.allclose(t['E_v'], 4 * t['E_u']) and np.allclose(t['E_tke'], 2.5 * t['E_u'])
+    t = spectra.tke_spectrum_3d(U, yc, 0.5, 1.0, L / nx, L / nz, spectrum='P')
+    assert np.allclose(t['P_v'], 4 * t['P_u']) and np.allclose(t['P_tke'], 2.5 * t['P_u'])
     assert np.isclose(t['tke_slope_10_50'], t['u_slope_10_50'])
     assert spectra.horizontal_spectrum_3d(alpha, yc, 0.5, 0.1, L / nx, L / nz) is None   # slab < 2 rows
 
@@ -270,7 +299,8 @@ def test_phase3_2d_bit_identical_to_legacy(legacy_rt, path, tmp_path):
             df = pd.DataFrame({'time': of_times})
             m._run_phase3_openfoam(analyzer, physics, path, of_times, str(tmp_path / 'legacy'), list(TIMES_2D),
                                    df, phys_nx=phys['NX'], phys_ny=phys['NY'])
-    res = phase3.run_2d(case, str(tmp_path / 'new'), times=TIMES_2D, log=lambda *a: None, tke='legacy')
+    res = phase3.run_2d(case, str(tmp_path / 'new'), times=TIMES_2D, log=lambda *a: None, tke='legacy',
+                        spectrum='P')
     files = _same_csvs(str(tmp_path / 'legacy'), str(tmp_path / 'new'))
     assert len(res['summary']) == 3 and len(res['velocity']) == 3
     assert 'velocity_statistics.csv' in files
@@ -311,9 +341,9 @@ def test_phase3_2d_kernels_match_legacy_classes(legacy_rt):
          spectra.dalziel_spectrum_2d(d['f'], d['x'], d['y'], y0, H))
     for fld in ('f', 'U', 'V'):
         same(psa.analyze_2d_field_spectrum(d[fld], d['x'], d['y'], fld, True),
-             spectra.field_spectrum_2d(d[fld], d['x'], d['y'], fld, True))
+             spectra.field_spectrum_2d(d[fld], d['x'], d['y'], fld, True, spectrum='P'))
     same(psa.analyze_tke_spectrum(d['U'], d['V'], d['x'], d['y'], True),
-         spectra.tke_spectrum_2d(d['U'], d['V'], d['x'], d['y'], mode='legacy'))
+         spectra.tke_spectrum_2d(d['U'], d['V'], d['x'], d['y'], mode='legacy', spectrum='P'))
     ref = VelocityAnalyzer().analyze_velocity_field(d['U'], d['V'])
     new = velocity.velocity_stats_2d(d['U'], d['V'])
     for a, b in [('u_mean', 'u_mean'), ('v_mean', 'v_mean'), ('u_rms', 'u_rms'), ('v_rms', 'v_rms'),
@@ -337,7 +367,7 @@ def test_phase3_3d_bit_identical_to_legacy(tmp_path):
         df = pd.DataFrame({'time': [t for t, _ in m.find_interface_timesteps(LBM3D)]})
         m.run_phase3(LBM3D, mesh, phys, rtp, str(tmp_path / 'legacy'), list(TIMES_3D), df)
     case = open_case(LBM3D)
-    res = phase3.run_3d(case, str(tmp_path / 'new'), times=TIMES_3D, log=lambda *a: None)
+    res = phase3.run_3d(case, str(tmp_path / 'new'), times=TIMES_3D, log=lambda *a: None, spectrum='P')
     _same_csvs(str(tmp_path / 'legacy'), str(tmp_path / 'new'))
     assert list(res['spectrum']['time']) == [6.0, 16.0]
     assert os.path.isfile(tmp_path / 'new' / 'spectra' / 'tke_spectrum_3d_t16.00.csv')
@@ -351,7 +381,7 @@ def test_phase3_3d_archived_spectrum():
     case = open_case(LBM3D)
     import tempfile
     with tempfile.TemporaryDirectory() as td:
-        res = phase3.run_3d(case, td, times=(4.0, 12.0), log=lambda *a: None)
+        res = phase3.run_3d(case, td, times=(4.0, 12.0), log=lambda *a: None, spectrum='P')
     ref = pd.read_csv(arch).set_index('time').loc[[4.0, 12.0]].reset_index()
     got = res['spectrum']
     assert list(got.columns) == list(ref.columns)

@@ -21,6 +21,16 @@ operation, so results are bit-identical to the legacy code.
                             linear radial bins, unweighted band fits.
     tke_spectrum_3d         the same for u, v, w and E_tke = (E_u+E_v+E_w)/2.
 
+Spectrum convention (spectrum='E' default, 'P' legacy) for the RADIAL
+spectra (2D full-domain, 3D horizontal slab):
+    P(k)  mean power per Fourier mode in each |k| ring (what the legacy code
+          computed, despite the legacy 'E_*' column names).
+    E(k)  ring-integrated energy density, E = 2 pi k P x (cell area)/(2 pi)^2
+          in the units used, so that integral E dk ~ the field's variance.
+          In a 2-D wavenumber plane slope_E = slope_P + 1, and the
+          Kolmogorov -5/3 / Bolgiano-Obukhov -11/5 exponents refer to E(k).
+The Dalziel slab spectrum is 1-D (FFT along x) and has no such ambiguity.
+
 Wavenumbers: 2D Dalziel and 3D spectra return k/k0 with k0 = 2 pi / L
 (equivalently 1/L in cycles), L the unpadded domain length, so k/k0 is the
 mode number.  The 2D radial spectra return k in rad/m.
@@ -28,6 +38,8 @@ mode number.  The 2D radial spectra return k in rad/m.
 import numpy as np
 
 _trapezoid = np.trapezoid if hasattr(np, 'trapezoid') else np.trapz
+
+SPECTRUM_CONVENTIONS = ('E', 'P')
 
 DALZIEL_BANDS = ((10.0, 25.0), (10.0, 50.0))
 BANDS_3D = (('10_25', 10, 25), ('10_50', 10, 50))
@@ -246,17 +258,42 @@ def spectrum_features(k, power, x_domain):
             'wavenumber_range': (k[0], k[-1])}
 
 
-def field_spectrum_2d(field, x, y, field_name='field', detrend=True, return_spectrum=False):
+def _check_convention(spectrum):
+    if spectrum not in SPECTRUM_CONVENTIONS:
+        raise ValueError(f'spectrum must be one of {SPECTRUM_CONVENTIONS}')
+
+
+def to_E_2d(k, P, dx, dy):
+    """Ring-integrated E(k) from mean power per mode P(k) of a 2-D field,
+    k in rad/m: E = k P dx dy / (2 pi), so integral E dk ~ variance."""
+    return k * P * dx * dy / (2 * np.pi)
+
+
+def field_spectrum_2d(field, x, y, field_name='field', detrend=True, return_spectrum=False, spectrum='E'):
     """Radially averaged spectrum of a 2D field plus its features (legacy
     ``analyze_2d_field_spectrum``).  With return_spectrum=True the binned
-    'k' and 'power' arrays are added to the result."""
+    'k' and 'power' arrays are added to the result.
+
+    spectrum='E' (default): features of the ring-integrated E(k) (slope,
+    R^2, dominant and cutoff wavelengths from E's peak), and total_energy is
+    the exact variance of the detrended field.  spectrum='P': the legacy
+    mean-power-per-mode P(k), total_energy a trapezoid over binned P."""
+    _check_convention(spectrum)
     if field.size < 100:
         return _empty_features()
     nx, ny = field.shape
     dx = np.abs(x[1, 0] - x[0, 0]) if nx > 1 else 1.0
     dy = np.abs(y[0, 1] - y[0, 0]) if ny > 1 else 1.0
-    k, power = radial_spectrum_2d(field, dx, dy, detrend)
-    out = spectrum_features(k, power, np.array([x.min(), x.max()]))
+    if spectrum == 'P':
+        k, power = radial_spectrum_2d(field, dx, dy, detrend)
+        out = spectrum_features(k, power, np.array([x.min(), x.max()]))
+    else:
+        K, pw, fc = power_2d(field, dx, dy, detrend)
+        k, P = radial_average_log(K, pw)
+        power = to_E_2d(k, P, dx, dy)
+        out = spectrum_features(k, power, np.array([x.min(), x.max()]))
+        out['total_energy'] = float(np.mean(fc ** 2))
+    out['spectrum'] = spectrum
     out['field_name'] = field_name
     out['grid_shape'] = field.shape
     if return_spectrum:
@@ -264,7 +301,8 @@ def field_spectrum_2d(field, x, y, field_name='field', detrend=True, return_spec
     return out
 
 
-def tke_spectrum_2d(u, v, x, y, detrend=True, u_spec=None, v_spec=None, mode='uv', return_spectrum=False):
+def tke_spectrum_2d(u, v, x, y, detrend=True, u_spec=None, v_spec=None, mode='uv', return_spectrum=False,
+                    spectrum='E'):
     """2D TKE spectrum.
 
     mode='uv' (default): the radial average of 1/2(P_u + P_v), i.e. the
@@ -273,12 +311,14 @@ def tke_spectrum_2d(u, v, x, y, detrend=True, u_spec=None, v_spec=None, mode='uv
     as the u and v spectra, so the three slopes are comparable.
     total_energy is the exact 1/2(<u'^2> + <v'^2>) of the detrended
     fluctuations (equal to the Parseval sum of the 2D power), not a trapezoid
-    over the binned spectrum.
+    over the binned spectrum.  spectrum='E' (default) gives the
+    ring-integrated E(k), 'P' the mean power per mode.
 
     mode='legacy': LEGACY QUIRK, reproduced: the result is the u spectrum's
     features (slope, R^2, dominant wavelength are those of u alone); only
     total_energy is (E_u + E_v)/2 of the binned-spectrum trapezoids.  Pass
     precomputed u_spec/v_spec to avoid recomputing them."""
+    _check_convention(spectrum)
     if mode == 'uv':
         if u.size < 100:
             return _empty_features()
@@ -288,7 +328,10 @@ def tke_spectrum_2d(u, v, x, y, detrend=True, u_spec=None, v_spec=None, mode='uv
         K, pu, uc = power_2d(u, dx, dy, detrend)
         _, pv, vc = power_2d(v, dx, dy, detrend)
         k, power = radial_average_log(K, 0.5 * (pu + pv))
+        if spectrum == 'E':
+            power = to_E_2d(k, power, dx, dy)
         out = spectrum_features(k, power, np.array([x.min(), x.max()]))
+        out['spectrum'] = spectrum
         out['total_energy'] = 0.5 * (np.mean(uc ** 2) + np.mean(vc ** 2))
         out['field_name'] = 'turbulent_kinetic_energy'
         out['grid_shape'] = u.shape
@@ -297,8 +340,8 @@ def tke_spectrum_2d(u, v, x, y, detrend=True, u_spec=None, v_spec=None, mode='uv
         return out
     if mode != 'legacy':
         raise ValueError("mode must be 'uv' or 'legacy'")
-    u_spec = field_spectrum_2d(u, x, y, 'u', detrend) if u_spec is None else u_spec
-    v_spec = field_spectrum_2d(v, x, y, 'v', detrend) if v_spec is None else v_spec
+    u_spec = field_spectrum_2d(u, x, y, 'u', detrend, spectrum=spectrum) if u_spec is None else u_spec
+    v_spec = field_spectrum_2d(v, x, y, 'v', detrend, spectrum=spectrum) if v_spec is None else v_spec
     out = dict(u_spec)
     out['field_name'] = 'turbulent_kinetic_energy'
     if not np.isnan(u_spec['total_energy']) and not np.isnan(v_spec['total_energy']):
@@ -357,23 +400,37 @@ def _slab(y_centers, y0, H):
     return (y_centers >= y0 - 0.1 * H) & (y_centers <= y0)
 
 
-def horizontal_spectrum_3d(alpha, y_centers, y0, H, dx, dz, bands=BANDS_3D):
+def to_E_xz(k_norm, P, k0, dx, dz):
+    """Ring-integrated E(k) from mean power per mode P(k) of a horizontal
+    (x, z) field, k = k_norm*k0 in cycles/m: E = 2 pi k P dx dz."""
+    return 2 * np.pi * (k_norm * k0) * P * dx * dz
+
+
+def horizontal_spectrum_3d(alpha, y_centers, y0, H, dx, dz, bands=BANDS_3D, spectrum='E'):
     """Concentration spectrum of alpha (nz, ny, nx) averaged over the slab
     y0 - 0.1H <= y <= y0.  None if the slab has fewer than 2 rows.
-    Returns k_over_k0, P, n_slab_rows, k0, slope_<band>, r2_<band>."""
+    Returns k_over_k0, n_slab_rows, k0, spectrum, slope_<band>, r2_<band>
+    and the spectrum array under 'E' (default, ring-integrated) or 'P'
+    (legacy, mean power per mode)."""
+    _check_convention(spectrum)
     slab = _slab(y_centers, y0, H)
     n_slab = int(slab.sum())
     if n_slab < 2:
         return None
     k_norm, P, k0 = radial_power_spectrum_xz(np.mean(alpha[:, slab, :], axis=1), dx, dz)
-    out = {'k_over_k0': k_norm, 'P': P, 'n_slab_rows': n_slab, 'k0': k0}
-    return fit_bands(k_norm, P, bands, out)
+    S = P if spectrum == 'P' else to_E_xz(k_norm, P, k0, dx, dz)
+    out = {'k_over_k0': k_norm, spectrum: S, 'n_slab_rows': n_slab, 'k0': k0, 'spectrum': spectrum}
+    return fit_bands(k_norm, S, bands, out)
 
 
-def tke_spectrum_3d(U, y_centers, y0, H, dx, dz, bands=BANDS_3D_TKE):
-    """Slab-averaged horizontal spectra E_u, E_v, E_w of U (nz, ny, nx, 3) and
-    E_tke = (E_u + E_v + E_w)/2, each with band fits (prefixes u_, v_, w_,
-    tke_).  None if U is None or the slab has fewer than 2 rows."""
+def tke_spectrum_3d(U, y_centers, y0, H, dx, dz, bands=BANDS_3D_TKE, spectrum='E'):
+    """Slab-averaged horizontal spectra of u, v, w from U (nz, ny, nx, 3) and
+    the TKE spectrum (u + v + w)/2, each with band fits (prefixes u_, v_, w_,
+    tke_).  Arrays are keyed E_u, E_v, E_w, E_tke for spectrum='E' (default,
+    ring-integrated) or P_u, P_v, P_w, P_tke for 'P' (legacy mean power per
+    mode, which the legacy code wrote under 'E_*' column names).  None if U
+    is None or the slab has fewer than 2 rows."""
+    _check_convention(spectrum)
     slab = _slab(y_centers, y0, H)
     if int(slab.sum()) < 2 or U is None:
         return None
@@ -382,9 +439,11 @@ def tke_spectrum_3d(U, y_centers, y0, H, dx, dz, bands=BANDS_3D_TKE):
     for i, comp in enumerate(('u', 'v', 'w')):
         f = np.mean(U[..., i][:, slab, :], axis=1)        # component first: (nz, nx)
         k_norm, P, k0 = radial_power_spectrum_xz(f, dx, dz)
-        E[comp] = P
-        out['k_over_k0'], out['k0'], out[f'E_{comp}'] = k_norm, k0, P
-        fit_bands(k_norm, P, bands, out, prefix=f'{comp}_')
-    out['E_tke'] = 0.5 * (E['u'] + E['v'] + E['w'])
-    fit_bands(out['k_over_k0'], out['E_tke'], bands, out, prefix='tke_')
+        S = P if spectrum == 'P' else to_E_xz(k_norm, P, k0, dx, dz)
+        E[comp] = S
+        out['k_over_k0'], out['k0'], out[f'{spectrum}_{comp}'] = k_norm, k0, S
+        fit_bands(k_norm, S, bands, out, prefix=f'{comp}_')
+    out[f'{spectrum}_tke'] = 0.5 * (E['u'] + E['v'] + E['w'])
+    out['spectrum'] = spectrum
+    fit_bands(out['k_over_k0'], out[f'{spectrum}_tke'], bands, out, prefix='tke_')
     return out
