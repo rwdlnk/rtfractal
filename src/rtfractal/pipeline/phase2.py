@@ -17,7 +17,8 @@ Outputs (same names and columns as the legacy analyzers; no plots):
       analysis/multifractal/t<t:.2f>__multifractal_params_3d.csv     (parameter, value)
       analysis/multifractal/t<t:.2f>__multifractal_scales_3d.csv     (delta, n_occupied)
 
-Times: each target time (default 2, 4, ..., 18 s) maps to the nearest
+Times: each target time (default 2, 4, ..., 18 s, which suits the Dalziel
+runs only; pass --mf-times for other cases) maps to the nearest
 snapshot; targets beyond the last snapshot + 0.5 s are dropped.  2D keeps
 one row per target (as legacy); 3D merges targets that map to the same
 snapshot.
@@ -40,6 +41,7 @@ The settings are recorded in analysis/rtfractal_run.json (rtfractal.plotdata).
 """
 import csv
 import os
+import sys
 import time
 
 import numpy as np
@@ -54,6 +56,35 @@ LEGACY_2D_MIN_BOX = 0.001       # RTAnalyzer.compute_multifractal_spectrum defau
 
 def _clamp_times(times, t_max):
     return [t for t in times if t <= t_max + 0.5]
+
+
+def _warn(log, msg):
+    """Warnings go to stderr as well as the log, so a run that exits 0 with
+    the wrong snapshots is still visible."""
+    print(f"rtfractal phase 2: WARNING: {msg}", file=sys.stderr)
+    if log is not print:
+        log(f"WARNING: {msg}")
+
+
+def _select_times(times, snapshots, log):
+    """Clamp target times to the data range and warn about anything that
+    silently changes the snapshot set: targets dropped past the last
+    snapshot, and targets whose nearest snapshot is more than half a snapshot
+    spacing away (the target lies outside the data, so it maps to an end)."""
+    st = np.array(sorted(s.t for s in snapshots))
+    kept = _clamp_times(times, st[-1])
+    dropped = [t for t in times if t not in kept]
+    if dropped:
+        _warn(log, f"{len(dropped)} of {len(times)} target times dropped (past last snapshot "
+                   f"t={st[-1]:.4g} + 0.5): {', '.join(f'{t:g}' for t in dropped)}; "
+                   f"pass --mf-times suited to this case")
+    half = 0.5 * float(np.median(np.diff(st))) if st.size > 1 else 0.0
+    far = [(t, st[np.argmin(abs(st - t))]) for t in kept]
+    far = [(t, a) for t, a in far if abs(a - t) > half + 1e-9]
+    if far:
+        _warn(log, "target times outside the snapshot range map to an end snapshot: "
+                   + ', '.join(f'{t:g}->{a:.4g}' for t, a in far))
+    return kept
 
 
 def _load_phase1_df(analysis_dir, df):
@@ -96,7 +127,7 @@ def run_2d(case, analysis_dir, times=MF_TIMES, q_values=multifractal.Q_DEFAULT, 
     os.makedirs(mf_dir, exist_ok=True)
     df = _load_phase1_df(analysis_dir, df)
     phys = case.physics
-    times = _clamp_times(times, max(s.t for s in case.snapshots))
+    times = _select_times(times, case.snapshots, log)
     if not times:
         log("WARNING: no multifractal times within the data range; skipping phase 2")
         return None
@@ -281,7 +312,7 @@ def run_3d(case, analysis_dir, times=MF_TIMES, q_values=multifractal.Q_DEFAULT, 
     mf_dir = os.path.join(analysis_dir, 'multifractal')
     os.makedirs(mf_dir, exist_ok=True)
     phys = case.physics
-    times = _clamp_times(times, max(s.t for s in case.snapshots))
+    times = _select_times(times, case.snapshots, log)
     if not times:
         log("WARNING: no multifractal times within the data range; skipping phase 2")
         return None

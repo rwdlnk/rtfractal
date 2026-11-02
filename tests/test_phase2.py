@@ -427,3 +427,14 @@ def test_3d_pipeline_files_identical_to_legacy_driver(legacy3d):
     assert len(names) == 1 + 3 * len(times)
     for f in names:
         assert _files_equal(os.path.join(lm, f), os.path.join(nm, f)), f
+
+
+def test_select_times_warns_on_dropped_and_far_targets(capsys):
+    from types import SimpleNamespace
+    from rtfractal.pipeline.phase2 import _select_times
+    snaps = [SimpleNamespace(t=0.0452 * i) for i in range(40)]     # last t = 1.763
+    assert _select_times([2, 4, 6], snaps, print) == [2]
+    err = capsys.readouterr().err
+    assert '2 of 3 target times dropped' in err and '2->1.763' in err
+    assert _select_times([0.4071, 1.593], snaps, print) == [0.4071, 1.593]
+    assert capsys.readouterr().err == ''

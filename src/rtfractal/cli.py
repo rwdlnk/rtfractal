@@ -112,7 +112,8 @@ def main(argv=None):
     a.add_argument('--phases', default='1,2,3',
                    help='comma-separated phases: 1 mixing + D, 2 multifractal, 3 spectra + velocity (default all)')
     a.add_argument('--mf-times', default='2,4,6,8,10,12,14,16,18',
-                   help='target times [s] for phase 2 (and phase 3 in 2D); nearest snapshot is used')
+                   help='target times [s] for phase 2 (and phase 3 in 2D); nearest snapshot is used. '
+                        'The default suits the Dalziel runs; set it per case elsewhere (dropped targets warn)')
     a.add_argument('--spec-times', default='2,4,6,8,10,12,14,16,18,20',
                    help='3D: target times [s] for phase 3 (time directory named exactly)')
     a.add_argument('--output-dir', help='default: CASE/analysis')
