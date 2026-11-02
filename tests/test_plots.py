@@ -180,3 +180,12 @@ def test_3d_figure_set_on_a_few_snapshots():
     re = _out('lbm3d_replot')
     cli.main(['plot', out, '--output-dir', re, '--dpi', DPI, '--phases', '1,2'])
     assert _pngs(re, 'summary') == SUMMARY_3D and _pngs(re, 'multifractal') == MF_3D
+
+
+def test_run_record_carries_source_provenance():
+    from rtfractal.plotdata import source_info
+    info = source_info()
+    assert info['rtfractal_version']
+    assert set(info) >= {'git_sha', 'git_dirty', 'source'}
+    if info['git_sha'] is not None:
+        assert len(info['git_sha']) == 40 and isinstance(info['git_dirty'], bool)

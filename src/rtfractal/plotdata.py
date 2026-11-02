@@ -28,6 +28,7 @@ import datetime
 import json
 import math
 import os
+import subprocess
 
 import numpy as np
 import pandas as pd
@@ -44,6 +45,28 @@ VELOCITY_SNAPSHOT_TIMES = (2.0, 8.0, 14.0, 18.0)
 
 
 # ─── run metadata and settings ───────────────────────────────────────────────
+
+_SOURCE = None
+
+
+def source_info():
+    """Which code produced a run: version, git commit and whether the package
+    source differed from it (editable installs pick up uncommitted edits).
+    Cached per process; git fields are None outside a git checkout."""
+    global _SOURCE
+    if _SOURCE is None:
+        pkg = os.path.dirname(os.path.abspath(__file__))
+        info = {'rtfractal_version': __version__, 'source': pkg, 'git_sha': None, 'git_dirty': None}
+        try:
+            run = lambda *a: subprocess.run(['git', '-C', pkg, *a], capture_output=True, text=True,
+                                            timeout=10, check=True).stdout.strip()
+            info['git_sha'] = run('rev-parse', 'HEAD')
+            info['git_dirty'] = bool(run('status', '--porcelain', '--', '.'))
+        except (OSError, subprocess.SubprocessError):
+            pass
+        _SOURCE = info
+    return dict(_SOURCE)
+
 
 def case_meta(case):
     """JSON-able description of a case (what the plots need from it)."""
@@ -76,7 +99,7 @@ def record_run(analysis_dir, case, phase, **settings):
     run = read_run(analysis_dir) or {}
     run['case'] = case_meta(case)
     settings = {k: (list(v) if isinstance(v, (tuple, np.ndarray)) else v) for k, v in settings.items()}
-    settings['rtfractal_version'] = __version__
+    settings.update(source_info())
     settings['written'] = datetime.datetime.now().isoformat(timespec='seconds')
     run.setdefault('phases', {})[str(phase)] = settings
     path = os.path.join(analysis_dir, RUN_JSON)

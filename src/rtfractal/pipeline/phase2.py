@@ -17,7 +17,7 @@ Outputs (same names and columns as the legacy analyzers; no plots):
       analysis/multifractal/t<t:.2f>__multifractal_params_3d.csv     (parameter, value)
       analysis/multifractal/t<t:.2f>__multifractal_scales_3d.csv     (delta, n_occupied)
 
-Times: each target time (default 2, 4, ..., 18 s, which suits the Dalziel
+Times: each target time in seconds, not tau (default 2, 4, ..., 18 s, which suits the Dalziel
 runs only; pass --mf-times for other cases) maps to the nearest
 snapshot; targets beyond the last snapshot + 0.5 s are dropped.  2D keeps
 one row per target (as legacy); 3D merges targets that map to the same

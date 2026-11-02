@@ -122,7 +122,11 @@ and Dq_evolution_3D, which some old SOLA-VOF folders hold. They came from
 **Data the plots read.** All figures are drawn from files on disk. Three
 small additions to the legacy layout make that possible (`plotdata.py`):
 - `analysis/rtfractal_run.json`: the case metadata and, per phase, the
-  settings it ran with.
+  settings it ran with and the code that ran it: `rtfractal_version`,
+  `git_sha` and `git_dirty`. `git_dirty` is true when the package source
+  had uncommitted edits. Editable installs pick those up, so the SHA alone
+  doesn't identify the code. Check it before mixing outputs from different
+  runs.
 - `analysis/plotdata/field_t*.npz` and `velocity_t*.npz` (2D): the picture
   fields. They're strided to at most 1000 cells per axis, as float32.
 - `analysis/plotdata/radial_spectra_t*.csv` (2D): the binned radial spectra.
