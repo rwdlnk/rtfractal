@@ -47,6 +47,13 @@ rtfractal analyze CASE --offsets legacy|covering --ladder legacy|L8 --trim legac
 rtfractal analyze CASE --tke uv|legacy                   # 2D TKE spectrum: of (u'^2+v'^2)/2 (default) or u only
 rtfractal analyze CASE --spectrum E|P                    # radial spectra: ring-integrated E(k) (default) or legacy P(k)
 rtfractal analyze CASE --no-plots                        # data files only; --dpi N (default 300)
+rtfractal analyze CASE --allow-missing-fields            # 3D: proceed on a partly reconstructed case
+
+rtfractal dimension FILE                    # one D from a plain segment file: x1 y1 x2 y2 per line
+rtfractal dimension FILE --as polyline      # 2 columns of ORDERED vertices instead
+rtfractal dimension FILE --min-box 1e-4 --max-box 0.05 --factor 1.5   # the ladder (defaults below)
+rtfractal dimension FILE --offsets legacy|covering --trim legacy|r2 --backend cpu|cuda
+rtfractal dimension FILE --csv ladder.csv   # also write the box-size/count ladder
 
 rtfractal plot CASE/analysis                # redraw every figure from the folder, no recomputation
 rtfractal plot CASE                         # same (a case folder means CASE/analysis)
@@ -78,17 +85,64 @@ from rtfractal.plots import plot_phase1, plot_phase2, plot_phase3, plot_all
 plot_all(case, 'out')                   # case may be None for a folder written by rtfractal
 ```
 
+## Plain segment files
+
+`rtfractal dimension FILE` puts any curve through the same estimator as the
+cases: four numeric columns per line are `x1 y1 x2 y2`, two columns with
+`--as polyline` are the ordered vertices of one curve. Whitespace, comma,
+semicolon and tab all work, one header line is skipped, and `#` or `%`
+comments are ignored.
+
+Two columns without `--as` is an error rather than a guess: an ordered
+polyline and an unordered point cloud look identical in a file and are
+counted differently. There is no point-cloud measure yet (`boxcount/` holds
+`segments2d` and `triangles3d` only), so `--as points` fails and says so.
+
+The ladder defaults to `extent/512` to `extent/8` at factor 1.5, and the
+chosen values are printed. Three things are warned about, because a bare
+file carries none of the context a case does:
+
+- **the ladder outrunning the data.** Below the shortest segments the set is
+  a collection of straight lines, which the count reads as `D = 1` and which
+  pulls the fit down. Measured on the Minkowski sausage at construction level
+  3: `-0.214` against exact on a ladder four steps too fine, `-0.086` with
+  the smallest box at the feature size.
+- **units.** `offset_fractions` switches on *absolute* box sizes (0.005 and
+  0.02), so the number of covering offsets, and therefore the bias, depends
+  on whether the file is in metres or in Lennard-Jones sigma. A known issue,
+  recorded below and not yet changed.
+- **a fallback fit.** When no window reaches the one-decade minimum, the
+  reported `D` is a whole-ladder regression rather than a selected window.
+  That used to be silent.
+
+## Partly reconstructed 3D cases
+
+A 3D OpenFOAM case writes `interface.vtk` live from a function object but
+needs `reconstructPar` for the volume fields, so a case can hold every
+interface mesh and only some time directories. The fractal dimension comes
+from the mesh and is unaffected; the mixing widths, `Theta`, `Theta_hat` and
+the energy budget cannot be computed, and phase 1 catches the read failure
+and fills those columns with `NaN`.
+
+`analyze` now stops before doing any work and names the affected time range.
+`--allow-missing-fields` proceeds anyway, with valid `D` and `NaN` mixing
+over that range. `case.snapshots_without_fields` exposes the list, and
+`read_alpha_3d`/`read_U_3d` raise a message naming `reconstructPar` instead
+of a bare missing-path error.
+
 ## Layout
 
 ```
-io/        case.py (format/dimension detection, snapshots, physics), openfoam.py, solavof.py, mesh.py
+io/        case.py (format/dimension detection, snapshots, physics), openfoam.py, solavof.py, mesh.py,
+           segments.py (plain segment/polyline files + ladder diagnostics)
 boxcount/  segments2d.py (Liang-Barsky, CPU+CUDA), triangles3d.py (SAT, CPU+CUDA),
            measures2d.py, measures3d.py (per-box segment counts / triangle areas, CPU+CUDA),
            scaling.py (boundary removal + optimal window, shared by 2D/3D), offsets.py
 interface.py  contours -> segments      mixing.py  widths, Theta, energy budget
 fractal.py    D of contours, surfaces, projections
 multifractal.py  tau(q), D_q, f(alpha)  spectra.py  Dalziel slab, radial, TKE spectra
-velocity.py   velocity statistics       pipeline/phase1.py, phase2.py, phase3.py      cli.py
+velocity.py   velocity statistics       shapes.py  Koch, Sierpinski, Minkowski, Hilbert, Dragon
+pipeline/     phase1.py, phase2.py, phase3.py                cli.py
 plotdata.py   rtfractal_run.json + plotdata/ (the small extra files the plots need)
 plots/        common.py (metadata, settings labels, Agg figures), phase1.py, phase2.py, phase3.py
 ```

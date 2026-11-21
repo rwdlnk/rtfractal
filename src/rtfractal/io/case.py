@@ -8,6 +8,9 @@
     case.snapshots      [Snapshot(t, key, ...)]
     case.read_2d(s)     dict(x, y, f[, U, V, P]) on cell centres, arrays (nx, ny)
     case.read_alpha_3d(s), case.read_U_3d(s), case.interface_mesh(s)
+    case.snapshots_without_fields   3D only: snapshots whose interface mesh
+                                    exists but whose volume fields are still
+                                    decomposed (reconstructPar not run that far)
 
 Conventions are inherited from the legacy analyzers so results reproduce:
 SOLA-VOF H0 comes from the int*.in disturbance height; OpenFOAM 2D uses
@@ -160,13 +163,32 @@ class OpenFOAM3DCase:
         dirs = {round(t, 9): d for t, d in of.time_dirs(path)}
         self.snapshots = [Snapshot(t, int(round(t * 1000)), dirs.get(round(t, 9)), vtk)
                           for t, vtk in of.interface_vtks(path)]
+        # A case can be PARTLY reconstructed: the interface is written live by a
+        # function object, so interface.vtk exists for every snapshot while
+        # reconstructPar has only run up to some earlier time.  The case then
+        # opens cleanly, every fractal dimension computes from the mesh, and
+        # every mixing width and Theta silently comes out NaN, because phase 1
+        # catches the read failure and fills the columns with nan.  Expose it
+        # here so the caller can say so before spending the run.
+        self.snapshots_without_fields = [s for s in self.snapshots if s.path is None]
+
+    def _require_fields(self, snap, what):
+        if snap.path is None:
+            raise FileNotFoundError(
+                f'no reconstructed time directory for t = {snap.t:g} s, so {what} cannot be '
+                f'read. The interface mesh for this snapshot exists, so the fractal dimension '
+                f'is fine, but mixing widths, Theta and the energy budget are not. '
+                f'Run reconstructPar over this time range in {self.path} first '
+                f'(reconstructPar -time {snap.t:g} , or -latestTime / -newTimes).')
 
     def read_alpha_3d(self, snap):
+        self._require_fields(snap, 'alpha.water')
         g3 = self.grid
         return of.read_scalar_field(os.path.join(snap.path, 'alpha.water'),
                                     g3.nx * g3.ny * g3.nz).reshape(g3.nz, g3.ny, g3.nx)
 
     def read_U_3d(self, snap):
+        self._require_fields(snap, 'U')
         p = os.path.join(snap.path, 'U')
         if not os.path.isfile(p):
             return None
