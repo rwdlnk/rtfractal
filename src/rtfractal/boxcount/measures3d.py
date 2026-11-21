@@ -284,7 +284,7 @@ def grid_optimized_measure(counter, delta, bbox, offsets='covering'):
 
     bbox: the mesh bounding box (BBox).  -> (measures, n_occupied, n_offsets_tested)."""
     dmax = np.array([bbox.max_x, bbox.max_y, bbox.max_z], dtype=np.float64)
-    fr = offset_fractions(delta)
+    fr = offset_fractions(delta, offsets)
     best_n, best, tests = None, np.array([]), 0
     for fx in fr:
         for fy in fr:

@@ -14,6 +14,7 @@ import numpy as np
 from numba import njit, prange
 
 from .. import backend as _backend
+from .ladder import box_ladder
 from .offsets import offset_fractions, origin
 
 
@@ -159,32 +160,34 @@ class SegmentCounter:
 MARGIN_FACTOR = 0.01
 
 
-def box_counting_2d(segs, min_box, max_box, factor=1.5, backend=None, offsets='covering'):
+def box_counting_2d(segs, min_box, max_box, factor=1.5, backend=None, offsets='covering',
+                    num_sizes=None, sizes=None):
     """Grid-optimised box counting -> (box_sizes, box_counts, bbox).
 
-    Sizes with zero occupied boxes are skipped (legacy behaviour)."""
+    Sizes with zero occupied boxes are skipped (legacy behaviour).
+    `num_sizes` or `sizes` replace the factor ladder; see `ladder.box_ladder`."""
     segs = np.ascontiguousarray(segs, dtype=np.float64)
     xs = np.concatenate([segs[:, 0], segs[:, 2]])
     ys = np.concatenate([segs[:, 1], segs[:, 3]])
     min_x, max_x, min_y, max_y = float(xs.min()), float(xs.max()), float(ys.min()), float(ys.max())
-    margin = max(max_x - min_x, max_y - min_y) * MARGIN_FACTOR
-    min_x -= margin
-    max_x += margin
-    min_y -= margin
-    max_y += margin
+    if offsets != 'single':
+        margin = max(max_x - min_x, max_y - min_y) * MARGIN_FACTOR
+        min_x -= margin
+        max_x += margin
+        min_y -= margin
+        max_y += margin
     counter = SegmentCounter(segs, backend)
-    sizes, counts = [], []
-    box = max_box
-    while box >= min_box:
+    kept_sizes, kept_counts = [], []
+    for box in box_ladder(min_box, max_box, factor, num_sizes, sizes):
         best = None
-        for fx in offset_fractions(box):
-            for fy in offset_fractions(box):
+        fr = offset_fractions(box, offsets)
+        for fx in fr:
+            for fy in fr:
                 c = counter.count(box, origin(min_x, fx, box, offsets), origin(min_y, fy, box, offsets), max_x, max_y)
                 best = c if best is None else min(best, c)
         if best > 0:
-            sizes.append(box)
-            counts.append(best)
-        box /= factor
-    if len(sizes) < 2:
+            kept_sizes.append(box)
+            kept_counts.append(best)
+    if len(kept_sizes) < 2:
         raise ValueError('not enough occupied box sizes for a fractal dimension')
-    return np.array(sizes), np.array(counts), (min_x, min_y, max_x, max_y)
+    return np.array(kept_sizes), np.array(kept_counts), (min_x, min_y, max_x, max_y)

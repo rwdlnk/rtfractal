@@ -26,8 +26,12 @@ def _trim_ends(x, y, trim='r2'):
     """Return (start, end) slice bounds after boundary removal on (x, y).
 
     trim='r2' (default) tests R^2 = r^2 < 0.95 as intended; trim='legacy'
-    tests the correlation coefficient r < 0.95 (see module note)."""
+    tests the correlation coefficient r < 0.95 (see module note); trim='none'
+    removes no end point at all, which is what reproducing a published bare
+    polyfit over a fixed ladder requires."""
     n = len(x)
+    if trim == 'none':
+        return 0, n
     seg = max(3, n // 4)
     if n <= 8 or n < 3 * seg:
         return 0, n
@@ -40,7 +44,7 @@ def _trim_ends(x, y, trim='r2'):
     if trim == 'r2':
         r_f, r_l = r_f ** 2, r_l ** 2
     elif trim != 'legacy':
-        raise ValueError("trim must be 'legacy' or 'r2'")
+        raise ValueError("trim must be 'none', 'legacy' or 'r2'")
     ts = te = 0
     if sl_m != 0:
         if abs(sl_f - sl_m) / abs(sl_m) > SLOPE_DEV or r_f < TRIM_R_MIN:
@@ -70,15 +74,52 @@ def _best_window(x, y):
     return (sl if rv ** 2 >= R2_MIN else np.nan), se, rv ** 2, 0, len(x)
 
 
+def local_slope(sizes, counts):
+    """-> (midpoint sizes, -d log N / d log size) between consecutive rungs.
+
+    A scaling range is where this is flat.  A crossover is where it is not,
+    and a straight line fitted across one returns a number set by where the
+    ladder stops rather than by the geometry.  The Cao MD atomic window is
+    the second kind, falling from about 1.50 to 0.96 across itself as the
+    boxes approach the point spacing; the 3-50 sigma window above it is the
+    first kind, flat to about +/-0.08 over 1.2 decades.
+    """
+    sizes = np.asarray(sizes, dtype=np.float64)
+    counts = np.asarray(counts, dtype=np.float64)
+    if len(sizes) < 2:
+        return np.empty(0), np.empty(0)
+    ls, lc = np.log(sizes), np.log(counts)
+    return np.exp(0.5 * (ls[:-1] + ls[1:])), -np.diff(lc) / np.diff(ls)
+
+
+def _window_flag(fitted_sizes, r2):
+    """-> (span in decades, 'selected' | 'fallback').
+
+    `_best_window` falls back to a whole-ladder regression when no window
+    clears R2_MIN and SPAN_MIN, and says nothing about having done so.  A
+    deliberately narrow window is a legitimate choice, but it should be
+    recorded as one: every fit over the Cao atomic window of 0.49 decades is
+    a fallback, and the paper's case for that window has to be made in words
+    because the estimator did not make it.
+    """
+    span = (float(np.log10(fitted_sizes.max() / fitted_sizes.min()))
+            if len(fitted_sizes) > 1 else 0.0)
+    return span, ('selected' if (r2 >= R2_MIN and span >= SPAN_MIN) else 'fallback')
+
+
 def dimension_2d(sizes, counts, trim='r2'):
-    """Legacy 2D protocol.  -> dict(dimension, error, r_squared, box_sizes, box_counts)
-    where box_sizes/box_counts are the fitted window."""
+    """Legacy 2D protocol.  -> dict(dimension, error, r_squared, box_sizes,
+    box_counts, span_decades, window) where box_sizes/box_counts are the
+    fitted window and `window` says whether one was selected or the fit fell
+    back to the whole ladder."""
     sizes = np.asarray(sizes, dtype=np.float64)
     counts = np.asarray(counts, dtype=np.float64)
     s, e = _trim_ends(np.log(sizes), np.log(counts), trim)
     sizes, counts = sizes[s:e], counts[s:e]
     sl, se, r2, a, b = _best_window(np.log10(sizes), np.log10(counts))
-    return dict(dimension=-sl, error=se, r_squared=r2, box_sizes=sizes[a:b], box_counts=counts[a:b])
+    span, flag = _window_flag(sizes[a:b], r2)
+    return dict(dimension=-sl, error=se, r_squared=r2, box_sizes=sizes[a:b], box_counts=counts[a:b],
+                span_decades=span, window=flag)
 
 
 def dimension_3d(deltas, counts, trim='r2'):
@@ -90,4 +131,6 @@ def dimension_3d(deltas, counts, trim='r2'):
     s, e = _trim_ends(x, y, trim)
     deltas, counts, x, y = deltas[s:e], counts[s:e], x[s:e], y[s:e]
     sl, se, r2, a, b = _best_window(x, y)
-    return dict(dimension=sl, error=se, r_squared=r2, box_sizes=deltas[a:b], box_counts=counts[a:b])
+    span, flag = _window_flag(deltas[a:b], r2)
+    return dict(dimension=sl, error=se, r_squared=r2, box_sizes=deltas[a:b], box_counts=counts[a:b],
+                span_decades=span, window=flag)

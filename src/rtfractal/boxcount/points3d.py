@@ -41,6 +41,7 @@ log10(1/delta) by `scaling.dimension_3d`.
 import numpy as np
 
 from .. import backend as _backend
+from .ladder import box_ladder
 from .offsets import offset_fractions, origin
 from .triangles3d import delta_ladder
 
@@ -138,14 +139,19 @@ class PointCounter3D:
 
 def box_counting_3d_points(pts, initial=None, factor=1.5, num_steps=20, min_delta=None,
                            max_delta=None, backend=None, log=None, offsets='covering',
-                           spacing=None, allow_below_spacing=False):
+                           spacing=None, allow_below_spacing=False, num_sizes=None, sizes=None):
     """Grid-optimised box counting of a 3D point set -> (deltas, counts, bbox).
 
     `initial` defaults to the characteristic length / 8, `min_delta` to twice
-    the nearest-neighbour spacing.  Raises ValueError if min_delta is below
-    the spacing, where the count saturates at n and the dimension collapses
-    toward 0; pass allow_below_spacing=True to override, or `spacing` to
-    supply a known value instead of measuring it.
+    the nearest-neighbour spacing.  Raises ValueError if the smallest cube is
+    below the spacing, where the count saturates at n and the dimension
+    collapses toward 0; pass allow_below_spacing=True to override, or
+    `spacing` to supply a known value instead of measuring it.
+
+    `num_sizes` or `sizes` replace the factor ladder; see `ladder.box_ladder`.
+    A strictly self-similar set wants a ladder commensurate with its own
+    construction: 3D Cantor dust on factor 3 reads its exact 1.8928, and the
+    same set on factor 2 reads 2.36.
     """
     pts = np.ascontiguousarray(pts, dtype=np.float64)
     if pts.ndim != 2 or pts.shape[1] != 3:
@@ -166,24 +172,28 @@ def box_counting_3d_points(pts, initial=None, factor=1.5, num_steps=20, min_delt
     if max_delta is None:
         max_delta = char
 
-    if min_delta < spacing and not allow_below_spacing:
-        raise ValueError(
-            f'smallest cube {min_delta:.6g} is below the nearest-neighbour spacing '
-            f'{spacing:.6g}. Below the spacing every cube holds at most one point, the '
-            f'count saturates at n = {len(pts)} and the dimension collapses toward 0, so '
-            f'the fit would be measuring the sampling and not the structure. Raise '
-            f'min_delta to at least {spacing:.6g}, or pass allow_below_spacing=True '
-            f'deliberately.')
-
-    deltas = delta_ladder(initial, factor, num_steps, min_delta, max_delta)
+    if num_sizes is not None or sizes is not None:
+        deltas = list(box_ladder(min_delta, min(initial, max_delta), factor, num_sizes, sizes))
+    else:
+        deltas = delta_ladder(initial, factor, num_steps, min_delta, max_delta)
     if len(deltas) < 3:
         raise ValueError(f'insufficient scale range: {len(deltas)} sizes between '
                          f'{min_delta:.6g} and {min(initial, max_delta):.6g}')
 
+    smallest = float(min(deltas))
+    if smallest < spacing and not allow_below_spacing:
+        raise ValueError(
+            f'smallest cube {smallest:.6g} is below the nearest-neighbour spacing '
+            f'{spacing:.6g}. Below the spacing every cube holds at most one point, the '
+            f'count saturates at n = {len(pts)} and the dimension collapses toward 0, so '
+            f'the fit would be measuring the sampling and not the structure. Raise '
+            f'the smallest cube to at least {spacing:.6g}, or pass allow_below_spacing=True '
+            f'deliberately.')
+
     counter = PointCounter3D(pts, backend)
     counts = []
     for d in deltas:
-        fr = offset_fractions(d)
+        fr = offset_fractions(d, offsets)
         best = None
         for fx in fr:
             for fy in fr:

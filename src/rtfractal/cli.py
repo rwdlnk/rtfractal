@@ -137,10 +137,11 @@ def _dimension_points(a):
     print(f"  {d['n']} points, {dim}D  {axes}  extent {d['extent']:.6g}")
     print(f"  nearest-neighbour spacing: median {d['spacing']:.4g}  "
           f"mean {d['spacing_mean']:.4g}  min {d['spacing_min']:.4g}")
+    rung = (f'num_sizes={a.num_sizes}' if a.num_sizes is not None else f'factor={a.factor}')
     print(f"  ladder: smallest={small:.6g}"
           f"{'' if a.min_box is not None else ' (2x spacing, default)'} "
           f"largest={large:.6g}{'' if a.max_box is not None else ' (extent/8, default)'} "
-          f"factor={a.factor}  offsets={a.offsets} trim={a.trim} backend={be}")
+          f"{rung}  offsets={a.offsets} trim={a.trim} backend={be}")
     if d['extent'] > 1.0 or d['extent'] < 0.01:
         print(f"  WARNING: extent is {d['extent']:.4g}. The covering-offset count switches on "
               f"absolute box sizes (0.005, 0.02), so results are not scale invariant; compare "
@@ -153,18 +154,20 @@ def _dimension_points(a):
     try:
         if dim == 2:
             res = fractal.dimension_of_points(pts, small, large, a.factor, be, a.offsets,
-                                              a.trim, d['spacing'], a.allow_below_spacing)
+                                              a.trim, d['spacing'], a.allow_below_spacing,
+                                              a.num_sizes)
             sizes, counts, _ = points2d.box_counting_2d_points(
-                pts, small, large, a.factor, be, a.offsets, d['spacing'], a.allow_below_spacing)
+                pts, small, large, a.factor, be, a.offsets, d['spacing'], a.allow_below_spacing,
+                a.num_sizes)
         else:
             res = fractal.dimension_of_points_3d(
                 pts, initial=large, factor=a.factor, num_steps=a.num_steps, min_delta=small,
                 backend=be, offsets=a.offsets, trim=a.trim, spacing=d['spacing'],
-                allow_below_spacing=a.allow_below_spacing)
+                allow_below_spacing=a.allow_below_spacing, num_sizes=a.num_sizes)
             sizes, counts, _ = points3d.box_counting_3d_points(
                 pts, initial=large, factor=a.factor, num_steps=a.num_steps, min_delta=small,
                 backend=be, offsets=a.offsets, spacing=d['spacing'],
-                allow_below_spacing=a.allow_below_spacing)
+                allow_below_spacing=a.allow_below_spacing, num_sizes=a.num_sizes)
     except ValueError as e:
         sys.exit(f'rtfractal dimension: {e}')
 
@@ -181,9 +184,24 @@ def _dimension_points(a):
               f"{scaling.SPAN_MIN:.0f}-decade minimum, so no window qualified and this D is a "
               f"whole-ladder regression, not a selected window. Widen the ladder.")
 
+    lad = res['ladder']
+    ms, ls = lad['local_slope_sizes'], lad['local_slope']
+    if len(ls) > 1:
+        print(f"  local slope over the ladder: {ls[0]:.3f} at {ms[0]:.4g} "
+              f"-> {ls[-1]:.3f} at {ms[-1]:.4g}  (spread {ls.max() - ls.min():.3f})")
+        if ls.max() - ls.min() > 0.3:
+            print("  NOTE: the local slope is not flat across this ladder, so D is an average "
+                  "over a crossover and depends on where the ladder stops. Narrow the ladder to "
+                  "the flat part, or report it as a crossover value.")
+    sat = lad['saturation'].max()
+    if sat > 0.5:
+        print(f"  NOTE: at the smallest box {100 * sat:.0f}% of the points are alone in their own "
+              f"box. The count is approaching n, where the slope is 0 by construction.")
+
     if a.csv:
         import pandas as pd
-        pd.DataFrame({'box_size': sizes, 'count': counts}).to_csv(a.csv, index=False)
+        pd.DataFrame({'box_size': sizes, 'count': counts,
+                      'saturation': lad['saturation']}).to_csv(a.csv, index=False)
         print(f"  ladder written to {a.csv}")
 
 
@@ -217,16 +235,19 @@ def _dimension(a):
           f"y [{d['y_min']:.6g}, {d['y_max']:.6g}]  extent {d['extent']:.6g}")
     print(f"  segment length: min {d['len_min']:.4g}  p10 {d['len_p10']:.4g}  "
           f"median {d['len_median']:.4g}  max {d['len_max']:.4g}")
+    rung = (f'num_sizes={a.num_sizes}' if a.num_sizes is not None else f'factor={a.factor}')
     print(f"  ladder: min_box={min_box:.6g}{'' if a.min_box is not None else ' (extent/512, default)'} "
           f"max_box={max_box:.6g}{'' if a.max_box is not None else ' (extent/8, default)'} "
-          f"factor={a.factor}  offsets={a.offsets} trim={a.trim} backend={be}")
+          f"{rung}  offsets={a.offsets} trim={a.trim} backend={be}")
     for w in warn:
         print(f"  WARNING: {w}")
 
-    sizes, counts, bbox = segments2d.box_counting_2d(segs, min_box, max_box, a.factor, be, a.offsets)
+    sizes, counts, bbox = segments2d.box_counting_2d(segs, min_box, max_box, a.factor, be,
+                                                     a.offsets, a.num_sizes)
     if len(sizes) < 2:
         sys.exit(f"only {len(sizes)} usable box sizes: widen the ladder")
-    res = fractal.dimension_of_segments(segs, min_box, max_box, a.factor, be, a.offsets, a.trim)
+    res = fractal.dimension_of_segments(segs, min_box, max_box, a.factor, be, a.offsets, a.trim,
+                                        a.num_sizes)
     span = np.log10(sizes.max() / sizes.min())
     fit = res['box_sizes']
     fit_span = np.log10(fit.max() / fit.min()) if len(fit) > 1 else 0.0
@@ -264,12 +285,15 @@ def main(argv=None):
     a.add_argument('--backend', choices=['auto', 'cpu', 'cuda'], default=None,
                    help='box-counting backend (default auto, or $RTFRACTAL_BACKEND)')
     a.add_argument('--contour-levels', default='0.5', help='2D: comma-separated levels for D')
-    a.add_argument('--offsets', choices=['legacy', 'covering'], default='covering',
-                   help='grid-origin offsets: covering (default) or legacy (reproduces FractalParameterAI; biased high)')
+    a.add_argument('--offsets', choices=['legacy', 'covering', 'single'], default='covering',
+                   help='grid-origin offsets: covering (default), legacy (reproduces '
+                        'FractalParameterAI; biased high) or single (one grid on the set\'s own '
+                        'minimum corner, no minimum over offsets)')
     a.add_argument('--ladder', choices=['L8', 'legacy'], default='L8',
                    help='largest box: L8 = L/8 (default) or legacy = L/2 (2D), min(L,W)/2 (3D)')
-    a.add_argument('--trim', choices=['r2', 'legacy'], default='r2',
-                   help='end-point trim test: r2 (default) or legacy (2D always trims both ends)')
+    a.add_argument('--trim', choices=['r2', 'legacy', 'none'], default='r2',
+                   help="end-point trim test: r2 (default), legacy (2D always trims both ends), or "
+                        "none (keep every rung)")
     a.add_argument('--tke', choices=['uv', 'legacy'], default='uv',
                    help="2D TKE spectrum: uv = spectrum of (u'^2+v'^2)/2 (default) or legacy (u spectrum only)")
     a.add_argument('--spectrum', choices=['E', 'P'], default='E',
@@ -299,9 +323,18 @@ def main(argv=None):
                         'length is warned about, since the ladder then reaches below the data)')
     d.add_argument('--max-box', type=float, default=None, help='largest box (default extent/8)')
     d.add_argument('--factor', type=float, default=1.5, help='ladder ratio between box sizes (default 1.5)')
-    d.add_argument('--offsets', choices=['legacy', 'covering'], default='covering',
-                   help='grid-origin offsets: covering (default) or legacy (biased high)')
-    d.add_argument('--trim', choices=['r2', 'legacy'], default='r2', help='end-point trim test (default r2)')
+    d.add_argument('--offsets', choices=['legacy', 'covering', 'single'], default='covering',
+                   help='grid-origin offsets: covering (default), legacy (biased high) or single '
+                        "(one grid on the set's own minimum corner, no minimum over offsets)")
+    d.add_argument('--num-sizes', type=int, default=None,
+                   help='use exactly this many geometrically spaced boxes, with --min-box and '
+                        '--max-box as the two ends, instead of the --factor ladder. A fixed window '
+                        'with a fixed number of boxes is a different measurement from a factor '
+                        'ladder over the same window, and on point clouds the difference is larger '
+                        'than the one between offset conventions.')
+    d.add_argument('--trim', choices=['r2', 'legacy', 'none'], default='r2',
+                   help="end-point trim test: r2 (default), legacy, or none (keep every rung, "
+                        "which a published bare polyfit over a fixed ladder needs)")
     d.add_argument('--backend', choices=['auto', 'cpu', 'cuda'], default=None, help='default auto')
     d.add_argument('--dim', type=int, choices=[2, 3], default=None,
                    help='--as points: 2 or 3 leading columns are the coordinates '

@@ -11,20 +11,39 @@ from .boxcount.triangles3d import box_counting_3d
 NAN_RESULT = dict(dimension=np.nan, error=np.nan, r_squared=np.nan)
 
 
-def dimension_of_segments(segs, min_box, max_box=None, factor=1.5, backend=None, offsets='covering', trim='r2'):
+def _ladder_diagnostics(sizes, counts, n_points):
+    """What the ladder looked like before anything was fitted to it.
+
+    `saturation` is the fraction of the cloud's own points that the count has
+    reached, N/n.  A point set cannot be counted below its own spacing, and it
+    stops being countable well above it: at N/n = 0.72 most points are already
+    alone in their box and the local slope is on its way to 0, which is the
+    dimension of a finite set and not of anything it samples.
+    """
+    ms, sl = scaling.local_slope(sizes, counts)
+    return dict(sizes=np.asarray(sizes, dtype=np.float64),
+                counts=np.asarray(counts),
+                saturation=np.asarray(counts, dtype=np.float64) / max(n_points, 1),
+                local_slope_sizes=ms, local_slope=sl)
+
+
+def dimension_of_segments(segs, min_box, max_box=None, factor=1.5, backend=None, offsets='covering',
+                          trim='r2', num_sizes=None, sizes=None):
     if len(segs) == 0:
         return dict(NAN_RESULT)
     if max_box is None:
         ext = max(np.ptp(np.r_[segs[:, 0], segs[:, 2]]), np.ptp(np.r_[segs[:, 1], segs[:, 3]]))
         max_box = ext / 8
-    sizes, counts, bbox = box_counting_2d(segs, min_box, max_box, factor, backend, offsets)
+    sizes, counts, bbox = box_counting_2d(segs, min_box, max_box, factor, backend, offsets,
+                                          num_sizes, sizes)
     res = scaling.dimension_2d(sizes, counts, trim)
     res['bounding_box'] = bbox
     return res
 
 
 def dimension_of_points(pts, min_box=None, max_box=None, factor=1.5, backend=None, offsets='covering',
-                        trim='r2', spacing=None, allow_below_spacing=False):
+                        trim='r2', spacing=None, allow_below_spacing=False,
+                        num_sizes=None, sizes=None):
     """Box-counting dimension of a 2D POINT SET.  -> the dimension_2d dict plus
     `spacing` and `n_points`.
 
@@ -43,18 +62,21 @@ def dimension_of_points(pts, min_box=None, max_box=None, factor=1.5, backend=Non
     if max_box is None:
         ext = max(np.ptp(pts[:, 0]), np.ptp(pts[:, 1]))
         max_box = ext / 8
-    sizes, counts, bbox = points2d.box_counting_2d_points(
-        pts, min_box, max_box, factor, backend, offsets, spacing, allow_below_spacing)
-    res = scaling.dimension_2d(sizes, counts, trim)
+    ladder_sizes, ladder_counts, bbox = points2d.box_counting_2d_points(
+        pts, min_box, max_box, factor, backend, offsets, spacing, allow_below_spacing,
+        num_sizes, sizes)
+    res = scaling.dimension_2d(ladder_sizes, ladder_counts, trim)
     res['bounding_box'] = bbox
     res['spacing'] = spacing
     res['n_points'] = len(pts)
+    res['ladder'] = _ladder_diagnostics(ladder_sizes, ladder_counts, len(pts))
     return res
 
 
 def dimension_of_points_3d(pts, initial=None, factor=1.5, num_steps=20, min_delta=None,
                            max_delta=None, backend=None, log=None, offsets='covering',
-                           trim='r2', spacing=None, allow_below_spacing=False):
+                           trim='r2', spacing=None, allow_below_spacing=False,
+                           num_sizes=None, sizes=None):
     """Box-counting dimension of a 3D POINT SET.  -> the dimension_3d dict plus
     `spacing` and `n_points`.
 
@@ -69,11 +91,12 @@ def dimension_of_points_3d(pts, initial=None, factor=1.5, num_steps=20, min_delt
         return dict(NAN_RESULT, spacing=np.nan, n_points=len(pts))
     deltas, counts, bbox = points3d.box_counting_3d_points(
         pts, initial, factor, num_steps, min_delta, max_delta, backend, log, offsets,
-        spacing, allow_below_spacing)
+        spacing, allow_below_spacing, num_sizes, sizes)
     res = scaling.dimension_3d(deltas, counts, trim)
     res['bounding_box'] = bbox
     res['spacing'] = spacing if spacing is not None else points3d.nn_spacing(pts)
     res['n_points'] = len(pts)
+    res['ladder'] = _ladder_diagnostics(deltas, counts, len(pts))
     return res
 
 

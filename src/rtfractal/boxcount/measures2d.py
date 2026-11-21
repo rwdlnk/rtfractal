@@ -189,8 +189,9 @@ def grid_optimized_measure(counter, box, bbox, offsets='covering'):
     -> (occupied box counts in flat order, n_occupied, n_offsets_tested)."""
     min_x, min_y, max_x, max_y = bbox
     best_n, best, tests = None, np.array([], dtype=np.int32), 0
-    for fx in offset_fractions(box):
-        for fy in offset_fractions(box):
+    fr = offset_fractions(box, offsets)
+    for fx in fr:
+        for fy in fr:
             tests += 1
             c, _, _ = counter.box_counts(box, origin(min_x, fx, box, offsets), origin(min_y, fy, box, offsets),
                                          max_x, max_y)

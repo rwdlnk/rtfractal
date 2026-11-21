@@ -223,7 +223,7 @@ def box_counting_3d(mesh, initial, factor=1.5, num_steps=20, min_delta=None, max
     dmax = np.array([bb.max_x, bb.max_y, bb.max_z], dtype=np.float64)
     counts = []
     for d in deltas:
-        fr = offset_fractions(d)
+        fr = offset_fractions(d, offsets)
         best = None
         for fx in fr:
             for fy in fr:

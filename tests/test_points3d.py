@@ -221,3 +221,13 @@ def test_point_counts_3d_cpu_equals_cuda():
         for o in (0.0, 0.37):
             lo = np.array([-0.01 + o * d, -0.01 + o * d, -0.01 + o * d])
             assert cpu.count(d, lo, hi) == gpu.count(d, lo, hi)
+
+
+def test_an_explicit_ladder_is_taken_as_given():
+    """The exact result needs a ladder commensurate with the construction, which
+    a factor ladder can only approximate.  `sizes=` says it outright."""
+    pts = cantor_dust(5)
+    res = fractal.dimension_of_points_3d(pts, sizes=[1 / 3.0 ** k for k in range(1, 5)],
+                                         allow_below_spacing=True)
+    assert res['dimension'] == pytest.approx(3 * np.log(2) / np.log(3), abs=1e-9)
+    assert list(res['ladder']['counts']) == [8, 64, 512, 4096]

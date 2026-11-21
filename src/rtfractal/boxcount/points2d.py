@@ -24,6 +24,7 @@ over the origin offsets.
 import numpy as np
 
 from .. import backend as _backend
+from .ladder import box_ladder
 from .offsets import offset_fractions, origin
 
 MARGIN_FACTOR = 0.01
@@ -115,13 +116,19 @@ class PointCounter:
 
 
 def box_counting_2d_points(pts, min_box, max_box, factor=1.5, backend=None, offsets='covering',
-                           spacing=None, allow_below_spacing=False):
+                           spacing=None, allow_below_spacing=False, num_sizes=None, sizes=None):
     """Grid-optimised box counting of a point set -> (box_sizes, box_counts, bbox).
 
-    Raises ValueError if min_box is below the nearest-neighbour spacing, where
-    the count saturates and the dimension collapses toward 0.  Pass
-    allow_below_spacing=True to override, or `spacing` to supply a known value
-    (the particle diameter, the extraction stride) instead of measuring it.
+    Raises ValueError if the smallest box is below the nearest-neighbour
+    spacing, where the count saturates and the dimension collapses toward 0.
+    Pass allow_below_spacing=True to override, or `spacing` to supply a known
+    value (the particle diameter, the extraction stride) instead of measuring
+    it.
+
+    `num_sizes` or `sizes` replace the factor ladder; see `ladder.box_ladder`.
+    The published MD counts use a fixed window with a fixed number of boxes,
+    which is `num_sizes`, and on those clouds the ladder is worth fifteen
+    times what the offset convention is.
     """
     pts = np.ascontiguousarray(pts, dtype=np.float64)
     if pts.ndim != 2 or pts.shape[1] != 2:
@@ -129,39 +136,41 @@ def box_counting_2d_points(pts, min_box, max_box, factor=1.5, backend=None, offs
     if len(pts) < 2:
         raise ValueError('a point cloud needs at least 2 points')
 
+    rungs = box_ladder(min_box, max_box, factor, num_sizes, sizes)
     if spacing is None:
         spacing = nn_spacing(pts)
-    if min_box < spacing and not allow_below_spacing:
+    smallest = float(rungs.min())
+    if smallest < spacing and not allow_below_spacing:
         raise ValueError(
-            f'smallest box {min_box:.6g} is below the nearest-neighbour spacing '
+            f'smallest box {smallest:.6g} is below the nearest-neighbour spacing '
             f'{spacing:.6g}. Below the spacing every box holds at most one point, the '
             f'count saturates at n = {len(pts)} and the dimension collapses toward 0, '
             f'so the fit would be measuring the sampling and not the structure. '
-            f'Raise min_box to at least {spacing:.6g}, or pass '
+            f'Raise the smallest box to at least {spacing:.6g}, or pass '
             f'allow_below_spacing=True deliberately.')
 
     min_x, max_x = float(pts[:, 0].min()), float(pts[:, 0].max())
     min_y, max_y = float(pts[:, 1].min()), float(pts[:, 1].max())
-    margin = max(max_x - min_x, max_y - min_y) * MARGIN_FACTOR
-    min_x -= margin
-    max_x += margin
-    min_y -= margin
-    max_y += margin
+    if offsets != 'single':
+        margin = max(max_x - min_x, max_y - min_y) * MARGIN_FACTOR
+        min_x -= margin
+        max_x += margin
+        min_y -= margin
+        max_y += margin
 
     counter = PointCounter(pts, backend)
-    sizes, counts = [], []
-    box = max_box
-    while box >= min_box:
+    kept_sizes, kept_counts = [], []
+    for box in rungs:
+        fr = offset_fractions(box, offsets)
         best = None
-        for fx in offset_fractions(box):
-            for fy in offset_fractions(box):
+        for fx in fr:
+            for fy in fr:
                 c = counter.count(box, origin(min_x, fx, box, offsets),
                                   origin(min_y, fy, box, offsets), max_x, max_y)
                 best = c if best is None else min(best, c)
         if best > 0:
-            sizes.append(box)
-            counts.append(best)
-        box /= factor
-    if len(sizes) < 2:
+            kept_sizes.append(box)
+            kept_counts.append(best)
+    if len(kept_sizes) < 2:
         raise ValueError('not enough occupied box sizes for a fractal dimension')
-    return np.array(sizes), np.array(counts), (min_x, min_y, max_x, max_y)
+    return np.array(kept_sizes), np.array(kept_counts), (min_x, min_y, max_x, max_y)
