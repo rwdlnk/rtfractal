@@ -65,14 +65,45 @@ def test_polyline_and_segment_forms_give_the_same_dimension(tmp_path):
 
 def test_two_columns_in_auto_mode_refuses_and_says_which(tmp_path):
     p = _write(tmp_path, 'two.txt', '0 0\n1 0\n1 1\n')
-    with pytest.raises(ValueError, match='ambiguous'):
+    with pytest.raises(ValueError, match='ambiguous') as e:
         segio.read_segments(p)
+    assert '--as polyline' in str(e.value) and '--as points' in str(e.value)
 
 
-def test_points_is_refused_with_the_reason(tmp_path):
+def test_read_segments_refuses_points_and_names_the_right_call(tmp_path):
+    """A point set is not segments, so read_segments says where to go."""
     p = _write(tmp_path, 'two.txt', '0 0\n1 0\n1 1\n')
-    with pytest.raises(NotImplementedError, match='point-cloud box counting is not implemented'):
+    with pytest.raises(ValueError, match='read_points'):
         segio.read_segments(p, kind='points')
+
+
+def test_read_points(tmp_path):
+    p = _write(tmp_path, 'cloud.csv', 'x,y\n0,0\n1,0\n0.5,0.5\n')
+    pts = segio.read_points(p)
+    assert pts.shape == (3, 2)
+    assert np.allclose(pts[2], [0.5, 0.5])
+
+
+def test_read_points_ignores_extra_columns(tmp_path):
+    p = _write(tmp_path, 'xyz.txt', '0 0 7\n1 0 8\n0.5 0.5 9\n')
+    assert segio.read_points(p).shape == (3, 2)
+
+
+def test_read_points_needs_two_columns(tmp_path):
+    p = _write(tmp_path, 'one.txt', '0\n1\n2\n')
+    with pytest.raises(ValueError, match='needs 2 columns'):
+        segio.read_points(p)
+
+
+def test_describe_points_reports_the_spacing(tmp_path):
+    g = np.linspace(0, 1, 11)
+    pts = np.stack(np.meshgrid(g, g), axis=-1).reshape(-1, 2)
+    p = tmp_path / 'lattice.txt'
+    np.savetxt(p, pts)
+    d = segio.describe_points(segio.read_points(str(p)))
+    assert d['n'] == 121
+    assert d['extent'] == pytest.approx(1.0)
+    assert d['spacing'] == pytest.approx(0.1)
 
 
 def test_ragged_rows_name_the_line(tmp_path):

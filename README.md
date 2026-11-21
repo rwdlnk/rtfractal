@@ -51,6 +51,8 @@ rtfractal analyze CASE --allow-missing-fields            # 3D: proceed on a part
 
 rtfractal dimension FILE                    # one D from a plain segment file: x1 y1 x2 y2 per line
 rtfractal dimension FILE --as polyline      # 2 columns of ORDERED vertices instead
+rtfractal dimension FILE --as points        # 2 columns of an UNORDERED 2D point cloud
+rtfractal dimension FILE --as points --allow-below-spacing   # cross the saturation bound anyway
 rtfractal dimension FILE --min-box 1e-4 --max-box 0.05 --factor 1.5   # the ladder (defaults below)
 rtfractal dimension FILE --offsets legacy|covering --trim legacy|r2 --backend cpu|cuda
 rtfractal dimension FILE --csv ladder.csv   # also write the box-size/count ladder
@@ -95,8 +97,9 @@ comments are ignored.
 
 Two columns without `--as` is an error rather than a guess: an ordered
 polyline and an unordered point cloud look identical in a file and are
-counted differently. There is no point-cloud measure yet (`boxcount/` holds
-`segments2d` and `triangles3d` only), so `--as points` fails and says so.
+counted differently. `--as polyline` differences the rows into segments;
+`--as points` counts occupied cells, which is a different measure with its
+own lower bound (next section).
 
 The ladder defaults to `extent/512` to `extent/8` at factor 1.5, and the
 chosen values are printed. Three things are warned about, because a bare
@@ -114,6 +117,64 @@ file carries none of the context a case does:
 - **a fallback fit.** When no window reaches the one-decade minimum, the
   reported `D` is a whole-ladder regression rather than a selected window.
   That used to be silent.
+
+## Point clouds
+
+`boxcount/points2d.py` counts a 2D point set, reached through
+`fractal.dimension_of_points()` or `rtfractal dimension FILE --as points`.
+A point occupies exactly one box, so there is no clipping test as for
+segments and no separating-axis test as for triangles: the cell index is
+`floor((p - origin) / delta)` and the count is the number of distinct cells.
+The CPU path takes the distinct count of the cell keys, costing O(n) memory
+and never allocating the grid; the CUDA path marks an occupancy array as the
+other two kernels do. Both count the same integer cells, so they agree
+exactly, which is asserted.
+
+**A finite point set has box dimension 0.** Below the spacing between the
+points every box holds at most one point, the count saturates at `n`, and the
+apparent dimension falls to 0. Taken two decades below the spacing the count
+is *exactly* `n` at every size, the slope is exactly 0 and the fit returns
+`NaN` — which is the right answer, and is a test. So a point ladder has a
+hard lower bound that a curve's does not, and the counter **refuses** to
+cross the median nearest-neighbour distance rather than warning about it.
+`allow_below_spacing=True` (`--allow-below-spacing`) overrides it; `spacing=`
+supplies a known value, such as a particle diameter or an extraction stride,
+instead of measuring one.
+
+`min_box` defaults to twice the spacing. Nearer than about four times it, the
+reported dimension starts to feel the saturation: on a uniform cloud in the
+unit square, exact dimension 2, the measured values are
+
+| n | spacing | D at 2x spacing | D at 4x spacing |
+|---|---|---|---|
+| 20,000 | 0.00328 | 1.8188 | 1.8920 |
+| 200,000 | 0.00105 | 1.9239 | 1.9320 |
+| 1,000,000 | 0.00047 | 1.9430 | 1.9494 |
+
+(`max_box = extent/8`, factor 1.5), approaching 2 as the sampling densifies,
+which is a property of finite sampling rather than of the counter. Note the
+large-box end matters too: a space-filling point count is a grid-cell count,
+which quantises hard when the box approaches the domain, so `extent/4` reads
+about 0.03 lower than `extent/8` throughout. Point samples of the shapes in
+`shapes.py` recover their dimensions on the same ladder:
+
+| shape | level | points | exact | measured |
+|---|---|---|---|---|
+| koch | 8 | 65,537 | 1.2619 | 1.2717 |
+| sierpinski | 8 | 9,843 | 1.5850 | 1.5853 |
+| minkowski | 6 | 218,793 | 1.5000 | 1.4676 |
+| hilbert | 9 | 262,144 | 2.0000 | 1.9337 |
+| dragon | 16 | 72,680 | 2.0000 | 1.7745 |
+
+A dense point sample of the Koch curve and the curve itself agree to 0.03,
+which is also a test. The plane-filling pair read low for the same
+finite-level reason as in `test_shapes.py`; note that the point measure does
+markedly better on Hilbert (-0.07) than the segment measure (-0.15).
+
+There is no 3D point counter yet. The honest ladder bound there is the
+surface sampling density rather than the volume's, and the known blindness of
+the 3D count to a near-planar surface will be worse on a sparse sample, so it
+wants its own calibration first.
 
 ## Partly reconstructed 3D cases
 
@@ -136,6 +197,7 @@ of a bare missing-path error.
 io/        case.py (format/dimension detection, snapshots, physics), openfoam.py, solavof.py, mesh.py,
            segments.py (plain segment/polyline files + ladder diagnostics)
 boxcount/  segments2d.py (Liang-Barsky, CPU+CUDA), triangles3d.py (SAT, CPU+CUDA),
+           points2d.py (occupied cells + nearest-neighbour bound, CPU+CUDA),
            measures2d.py, measures3d.py (per-box segment counts / triangle areas, CPU+CUDA),
            scaling.py (boundary removal + optimal window, shared by 2D/3D), offsets.py
 interface.py  contours -> segments      mixing.py  widths, Theta, energy budget

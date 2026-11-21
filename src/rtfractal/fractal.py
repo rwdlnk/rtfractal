@@ -4,6 +4,7 @@ import numpy as np
 from . import interface
 from .boxcount import scaling
 from .boxcount.offsets import offset_fractions
+from .boxcount import points2d
 from .boxcount.segments2d import box_counting_2d
 from .boxcount.triangles3d import box_counting_3d
 
@@ -19,6 +20,35 @@ def dimension_of_segments(segs, min_box, max_box=None, factor=1.5, backend=None,
     sizes, counts, bbox = box_counting_2d(segs, min_box, max_box, factor, backend, offsets)
     res = scaling.dimension_2d(sizes, counts, trim)
     res['bounding_box'] = bbox
+    return res
+
+
+def dimension_of_points(pts, min_box=None, max_box=None, factor=1.5, backend=None, offsets='covering',
+                        trim='r2', spacing=None, allow_below_spacing=False):
+    """Box-counting dimension of a 2D POINT SET.  -> the dimension_2d dict plus
+    `spacing` and `n_points`.
+
+    A finite point set has box dimension 0 below the spacing between its
+    points, so the ladder has a hard lower bound that a curve's does not;
+    `box_counting_2d_points` refuses to cross it.  min_box defaults to twice
+    the measured nearest-neighbour spacing, max_box to extent/8 as elsewhere.
+    """
+    pts = np.asarray(pts, dtype=np.float64)
+    if len(pts) < 2:
+        return dict(NAN_RESULT, spacing=np.nan, n_points=len(pts))
+    if spacing is None:
+        spacing = points2d.nn_spacing(pts)
+    if min_box is None:
+        min_box = 2.0 * spacing
+    if max_box is None:
+        ext = max(np.ptp(pts[:, 0]), np.ptp(pts[:, 1]))
+        max_box = ext / 8
+    sizes, counts, bbox = points2d.box_counting_2d_points(
+        pts, min_box, max_box, factor, backend, offsets, spacing, allow_below_spacing)
+    res = scaling.dimension_2d(sizes, counts, trim)
+    res['bounding_box'] = bbox
+    res['spacing'] = spacing
+    res['n_points'] = len(pts)
     return res
 
 

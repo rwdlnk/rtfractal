@@ -115,6 +115,68 @@ def _plot_cmd(a):
     print(f"{len(files)} figures written")
 
 
+def _dimension_points(a):
+    """One box-counting dimension from a 2D point set (x y per line)."""
+    import numpy as np
+
+    from . import fractal
+    from .boxcount import points2d, scaling
+
+    try:
+        pts = segio.read_points(a.file)
+        d = segio.describe_points(pts)
+    except (ValueError, OSError) as e:
+        sys.exit(f'rtfractal dimension: {e}')
+    be = backend.resolve(a.backend)
+    min_box = a.min_box if a.min_box is not None else 2.0 * d['spacing']
+    max_box = a.max_box if a.max_box is not None else d['extent'] / 8
+
+    print(f"rtfractal {__version__}: {os.path.abspath(a.file)}")
+    print(f"  {d['n']} points  x [{d['x_min']:.6g}, {d['x_max']:.6g}]  "
+          f"y [{d['y_min']:.6g}, {d['y_max']:.6g}]  extent {d['extent']:.6g}")
+    print(f"  nearest-neighbour spacing: median {d['spacing']:.4g}  "
+          f"mean {d['spacing_mean']:.4g}  min {d['spacing_min']:.4g}")
+    print(f"  ladder: min_box={min_box:.6g}"
+          f"{'' if a.min_box is not None else ' (2x spacing, default)'} "
+          f"max_box={max_box:.6g}{'' if a.max_box is not None else ' (extent/8, default)'} "
+          f"factor={a.factor}  offsets={a.offsets} trim={a.trim} backend={be}")
+    if d['extent'] > 1.0 or d['extent'] < 0.01:
+        print(f"  WARNING: extent is {d['extent']:.4g}. The covering-offset count switches on "
+              f"absolute box sizes (0.005, 0.02), so results are not scale invariant; compare "
+              f"only with runs at a similar extent, or rescale to match.")
+    if min_box < 4.0 * d['spacing']:
+        print(f"  NOTE: min_box is {min_box / d['spacing']:.1f}x the spacing. A point set "
+              f"saturates as the box approaches the spacing, where every box holds one point "
+              f"and D falls toward 0. Measured on a uniform cloud, D reads about 0.1 low at "
+              f"2x spacing and is best near 4x.")
+
+    try:
+        res = fractal.dimension_of_points(pts, min_box, max_box, a.factor, be, a.offsets,
+                                          a.trim, d['spacing'], a.allow_below_spacing)
+        sizes, counts, _ = points2d.box_counting_2d_points(
+            pts, min_box, max_box, a.factor, be, a.offsets, d['spacing'], a.allow_below_spacing)
+    except ValueError as e:
+        sys.exit(f'rtfractal dimension: {e}')
+
+    fit = res['box_sizes']
+    fit_span = np.log10(fit.max() / fit.min()) if len(fit) > 1 else 0.0
+    span = np.log10(sizes.max() / sizes.min())
+    print(f"\n  D = {res['dimension']:.4f} +/- {res['error']:.4f}   R^2 = {res['r_squared']:.5f}")
+    print(f"  ladder {len(sizes)} sizes spanning {span:.2f} decades; "
+          f"fitted window {len(fit)} sizes [{fit.min():.4g}, {fit.max():.4g}]")
+    if np.isnan(res['dimension']):
+        print("  D is NaN: no window reached the R^2 and span thresholds")
+    elif fit_span < scaling.SPAN_MIN:
+        print(f"  WARNING: the fitted window spans {fit_span:.2f} decades, under the "
+              f"{scaling.SPAN_MIN:.0f}-decade minimum, so no window qualified and this D is a "
+              f"whole-ladder regression, not a selected window. Widen the ladder.")
+
+    if a.csv:
+        import pandas as pd
+        pd.DataFrame({'box_size': sizes, 'count': counts}).to_csv(a.csv, index=False)
+        print(f"  ladder written to {a.csv}")
+
+
 def _dimension(a):
     """One box-counting dimension from a plain segment or polyline file."""
     import numpy as np
@@ -122,6 +184,8 @@ def _dimension(a):
     from . import fractal
     from .boxcount import scaling, segments2d
 
+    if a.as_kind == 'points':
+        return _dimension_points(a)
     try:
         segs = segio.read_segments(a.file, kind=a.as_kind)
     except (ValueError, NotImplementedError, OSError) as e:
@@ -218,7 +282,8 @@ def main(argv=None):
     d.add_argument('--as', dest='as_kind', choices=['auto', 'segments', 'polyline', 'points'],
                    default='auto',
                    help="how to read the columns: auto (default; 4 -> segments, 2 -> error saying which), "
-                        "segments, polyline, or points (not implemented; explains why)")
+                        "segments, polyline (ordered vertices of one curve), or points (an unordered "
+                        "2D cloud, counted by occupied cell)")
     d.add_argument('--min-box', type=float, default=None,
                    help='smallest box (default extent/512; a value below the 10th-percentile segment '
                         'length is warned about, since the ladder then reaches below the data)')
@@ -228,6 +293,9 @@ def main(argv=None):
                    help='grid-origin offsets: covering (default) or legacy (biased high)')
     d.add_argument('--trim', choices=['r2', 'legacy'], default='r2', help='end-point trim test (default r2)')
     d.add_argument('--backend', choices=['auto', 'cpu', 'cuda'], default=None, help='default auto')
+    d.add_argument('--allow-below-spacing', action='store_true',
+                   help='--as points: allow a smallest box below the nearest-neighbour spacing, '
+                        'where the count saturates and D collapses toward 0. Refused otherwise.')
     d.add_argument('--csv', help='also write the box-size/count ladder here')
     d.set_defaults(func=_dimension)
 

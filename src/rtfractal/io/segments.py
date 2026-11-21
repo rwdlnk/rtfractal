@@ -22,7 +22,8 @@ import re
 
 import numpy as np
 
-__all__ = ['read_segments', 'read_columns', 'suggest_min_box', 'describe']
+__all__ = ['read_segments', 'read_points', 'read_columns', 'suggest_min_box',
+           'describe', 'describe_points']
 
 _SPLIT = re.compile(r'[\s,;]+')
 
@@ -66,12 +67,10 @@ def read_segments(path, kind='auto'):
     kind='points'   not supported yet; raises with the reason
     """
     if kind == 'points':
-        raise NotImplementedError(
-            'point-cloud box counting is not implemented. rtfractal measures '
-            'segments (boxcount/segments2d.py) and triangles '
-            '(boxcount/triangles3d.py); an unordered cloud needs a third '
-            'measure. Extract a curve from the points and read it as '
-            "kind='polyline', or count the points with another tool.")
+        raise ValueError(
+            'a point set is not segments. Read it with read_points() and measure it '
+            'with fractal.dimension_of_points() or boxcount.points2d, which count '
+            'occupied cells rather than clipping a curve against them.')
     if kind not in ('auto', 'segments', 'polyline'):
         raise ValueError("kind must be 'auto', 'segments', 'polyline' or 'points'")
 
@@ -93,9 +92,9 @@ def read_segments(path, kind='auto'):
         raise ValueError(
             f'{path}: 2 columns is ambiguous. An ordered polyline and an '
             'unordered point cloud look the same in a file and are counted '
-            "differently. Pass kind='polyline' (--as polyline) if the rows "
-            'are in order along a curve. If they are a cloud, point-cloud '
-            'counting is not implemented yet.')
+            "differently. Pass kind='polyline' (--as polyline) if the rows are "
+            "in order along a curve, or kind='points' (--as points) if they are "
+            'a cloud.')
     raise ValueError(f'{path}: need 4 columns (x1 y1 x2 y2) or 2 '
                      f'(polyline vertices), found {ncol}')
 
@@ -144,3 +143,31 @@ def suggest_min_box(segs, divisor=512):
             'sizes (0.005, 0.02), so results are not scale invariant; compare only '
             'with runs at a similar extent, or rescale to match.' % d['extent'])
     return min_box, warn
+
+
+def read_points(path):
+    """-> (M, 2) point set from the first two numeric columns of a text file.
+
+    Unlike a polyline, the order of the rows does not matter and is not used.
+    """
+    data = read_columns(path)
+    if data.shape[1] < 2:
+        raise ValueError(f'{path}: a point set needs 2 columns (x y), '
+                         f'found {data.shape[1]}')
+    pts = np.ascontiguousarray(data[:, :2])
+    if len(pts) < 2:
+        raise ValueError(f'{path}: a point set needs at least 2 points')
+    return pts
+
+
+def describe_points(pts):
+    """-> dict of the geometry a point ladder needs: extent and spacing."""
+    from ..boxcount import points2d
+
+    return dict(n=len(pts),
+                x_min=float(pts[:, 0].min()), x_max=float(pts[:, 0].max()),
+                y_min=float(pts[:, 1].min()), y_max=float(pts[:, 1].max()),
+                extent=float(max(np.ptp(pts[:, 0]), np.ptp(pts[:, 1]))),
+                spacing=points2d.nn_spacing(pts),
+                spacing_min=points2d.nn_spacing(pts, 'min'),
+                spacing_mean=points2d.nn_spacing(pts, 'mean'))
