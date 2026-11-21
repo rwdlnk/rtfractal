@@ -84,15 +84,34 @@ def test_read_points(tmp_path):
     assert np.allclose(pts[2], [0.5, 0.5])
 
 
-def test_read_points_ignores_extra_columns(tmp_path):
+def test_three_columns_read_as_a_3d_cloud(tmp_path):
     p = _write(tmp_path, 'xyz.txt', '0 0 7\n1 0 8\n0.5 0.5 9\n')
-    assert segio.read_points(p).shape == (3, 2)
+    assert segio.read_points(p).shape == (3, 3)
+    assert segio.read_points(p, dim=2).shape == (3, 2)
 
 
-def test_read_points_needs_two_columns(tmp_path):
-    p = _write(tmp_path, 'one.txt', '0\n1\n2\n')
-    with pytest.raises(ValueError, match='needs 2 columns'):
+def test_more_than_three_columns_asks_which_are_coordinates(tmp_path):
+    p = _write(tmp_path, 'four.txt', '0 0 7 1\n1 0 8 2\n0.5 0.5 9 3\n')
+    with pytest.raises(ValueError, match='ambiguous'):
         segio.read_points(p)
+    assert segio.read_points(p, dim=3).shape == (3, 3)
+
+
+def test_read_points_needs_at_least_two_columns(tmp_path):
+    p = _write(tmp_path, 'one.txt', '0\n1\n2\n')
+    with pytest.raises(ValueError, match='needs 2 or 3 columns'):
+        segio.read_points(p)
+
+
+def test_describe_points_in_3d(tmp_path):
+    g = np.linspace(0, 1, 6)
+    pts = np.stack(np.meshgrid(g, g, g), axis=-1).reshape(-1, 3)
+    p = tmp_path / 'lattice3.txt'
+    np.savetxt(p, pts)
+    d = segio.describe_points(segio.read_points(str(p)))
+    assert d['dim'] == 3 and d['n'] == 216
+    assert d['spacing'] == pytest.approx(0.2)
+    assert d['z_max'] == pytest.approx(1.0)
 
 
 def test_describe_points_reports_the_spacing(tmp_path):

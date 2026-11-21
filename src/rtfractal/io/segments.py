@@ -145,29 +145,53 @@ def suggest_min_box(segs, divisor=512):
     return min_box, warn
 
 
-def read_points(path):
-    """-> (M, 2) point set from the first two numeric columns of a text file.
+def read_points(path, dim=None):
+    """-> (M, 2) or (M, 3) point set from a text file.
 
     Unlike a polyline, the order of the rows does not matter and is not used.
+    `dim=None` reads 2 columns as a 2D cloud and 3 as a 3D one; more than 3
+    is an error rather than a guess about which columns are coordinates.
+    `dim=2` or `dim=3` takes that many leading columns explicitly.
     """
     data = read_columns(path)
-    if data.shape[1] < 2:
-        raise ValueError(f'{path}: a point set needs 2 columns (x y), '
-                         f'found {data.shape[1]}')
-    pts = np.ascontiguousarray(data[:, :2])
+    ncol = data.shape[1]
+    if dim is None:
+        if ncol in (2, 3):
+            dim = ncol
+        elif ncol < 2:
+            raise ValueError(f'{path}: a point set needs 2 or 3 columns, found {ncol}')
+        else:
+            raise ValueError(
+                f'{path}: {ncol} columns, so which are the coordinates is ambiguous. '
+                f'Pass dim=2 or dim=3 (--dim) to take that many leading columns.')
+    elif dim not in (2, 3):
+        raise ValueError('dim must be 2, 3 or None')
+    elif ncol < dim:
+        raise ValueError(f'{path}: dim={dim} needs {dim} columns, found {ncol}')
+    pts = np.ascontiguousarray(data[:, :dim])
     if len(pts) < 2:
         raise ValueError(f'{path}: a point set needs at least 2 points')
     return pts
 
 
 def describe_points(pts):
-    """-> dict of the geometry a point ladder needs: extent and spacing."""
-    from ..boxcount import points2d
+    """-> dict of the geometry a point ladder needs: extents and spacing.
 
-    return dict(n=len(pts),
-                x_min=float(pts[:, 0].min()), x_max=float(pts[:, 0].max()),
-                y_min=float(pts[:, 1].min()), y_max=float(pts[:, 1].max()),
-                extent=float(max(np.ptp(pts[:, 0]), np.ptp(pts[:, 1]))),
-                spacing=points2d.nn_spacing(pts),
-                spacing_min=points2d.nn_spacing(pts, 'min'),
-                spacing_mean=points2d.nn_spacing(pts, 'mean'))
+    Works for 2D and 3D; `dim` and per-axis `lo`/`hi` are in the result.
+    """
+    from ..boxcount import points2d, points3d
+
+    pts = np.asarray(pts, dtype=np.float64)
+    dim = pts.shape[1]
+    mod = points2d if dim == 2 else points3d
+    lo = [float(pts[:, i].min()) for i in range(dim)]
+    hi = [float(pts[:, i].max()) for i in range(dim)]
+    d = dict(n=len(pts), dim=dim, lo=lo, hi=hi,
+             extent=float(max(h - l for l, h in zip(lo, hi))),
+             spacing=mod.nn_spacing(pts),
+             spacing_min=mod.nn_spacing(pts, 'min'),
+             spacing_mean=mod.nn_spacing(pts, 'mean'))
+    d.update(x_min=lo[0], x_max=hi[0], y_min=lo[1], y_max=hi[1])
+    if dim == 3:
+        d.update(z_min=lo[2], z_max=hi[2])
+    return d

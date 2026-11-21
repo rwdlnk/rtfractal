@@ -51,7 +51,8 @@ rtfractal analyze CASE --allow-missing-fields            # 3D: proceed on a part
 
 rtfractal dimension FILE                    # one D from a plain segment file: x1 y1 x2 y2 per line
 rtfractal dimension FILE --as polyline      # 2 columns of ORDERED vertices instead
-rtfractal dimension FILE --as points        # 2 columns of an UNORDERED 2D point cloud
+rtfractal dimension FILE --as points        # UNORDERED point cloud: 2 columns 2D, 3 columns 3D
+rtfractal dimension FILE --as points --dim 3 # take 3 leading columns explicitly
 rtfractal dimension FILE --as points --allow-below-spacing   # cross the saturation bound anyway
 rtfractal dimension FILE --min-box 1e-4 --max-box 0.05 --factor 1.5   # the ladder (defaults below)
 rtfractal dimension FILE --offsets legacy|covering --trim legacy|r2 --backend cpu|cuda
@@ -171,10 +172,52 @@ which is also a test. The plane-filling pair read low for the same
 finite-level reason as in `test_shapes.py`; note that the point measure does
 markedly better on Hilbert (-0.07) than the segment measure (-0.15).
 
-There is no 3D point counter yet. The honest ladder bound there is the
-surface sampling density rather than the volume's, and the known blindness of
-the 3D count to a near-planar surface will be worse on a sparse sample, so it
-wants its own calibration first.
+### In 3D
+
+`boxcount/points3d.py` is the same measure with the same hard bound, reached
+through `fractal.dimension_of_points_3d()` or `--as points` on a 3-column
+file. For a cloud sampling a *surface* the nearest-neighbour distance is the
+surface sampling density, which is the scale that matters; nothing is derived
+from the bounding-box volume, which would be wrong by the aspect ratio of a
+thin layer.
+
+It recovers an exact answer where one exists. A 3D Cantor dust at level 6 on
+a ladder commensurate with its construction (factor 3) gives counts of
+exactly 8, 64, 512 and 4096, D = 1.8928 against the exact 3·log2/log3 =
+1.8928, at R² = 1.0000.
+
+**That same set shows the ladder factor is not cosmetic.** On factor 1.5 it
+reads +0.069 and on factor 2.0 it reads **+0.469**, because a strictly
+self-similar set has a staircase box count: it jumps by 8 each time δ crosses
+a factor of 3 and is flat between, so an incommensurate ladder aliases.
+Physical interfaces are not strictly self-similar and the default 1.5 is fine
+for them, but a textbook set wants a commensurate ladder.
+
+Other sets, default ladder:
+
+| set | points | exact | measured |
+|---|---|---|---|
+| Sierpinski tetrahedron, L7 | 32,770 | 2.0000 | 2.0038 |
+| Menger sponge, L5 | 3,200,000 | 2.7268 | 2.7918 |
+| regularly sampled plane | 160,000 | 2.0000 | 2.0087 |
+| sphere surface | 200,000 | 2.0000 | 1.9402 |
+| uniform cube | 300,000 | 3.0000 | 2.8981 |
+
+**On the near-planar case, measure before assuming.** The documented legacy
+D = 5 to 9 at R² ≈ 0.8 on a nearly flat early-time surface belongs to the
+**legacy offsets**, not to the triangle measure: a flat surface lies below
+every shifted origin and the counts come out zero, which is now a test. With
+covering offsets the triangle counter handles a flat plane perfectly well,
+measured at D = 2.018, R² = 0.9999. So the point counter does not rescue a
+broken case; the offset correction already did.
+
+What a point sample adds is a second, independent measure that agrees with
+the corrected one where both are valid: 2.009 against 2.018 on a sampled
+plane, and exactly 2.0087 for both on the same plane perturbed by 1e-3. They
+separate once the surface carries structure near the sampling scale (2.139
+against 2.208 at a 1e-2 perturbation), which is expected, because a mesh and
+a vertex sample of it are then different sets. Agreement is a check; the two
+must not be mixed in one comparison.
 
 ## Partly reconstructed 3D cases
 
@@ -197,7 +240,7 @@ of a bare missing-path error.
 io/        case.py (format/dimension detection, snapshots, physics), openfoam.py, solavof.py, mesh.py,
            segments.py (plain segment/polyline files + ladder diagnostics)
 boxcount/  segments2d.py (Liang-Barsky, CPU+CUDA), triangles3d.py (SAT, CPU+CUDA),
-           points2d.py (occupied cells + nearest-neighbour bound, CPU+CUDA),
+           points2d.py, points3d.py (occupied cells + nearest-neighbour bound, CPU+CUDA),
            measures2d.py, measures3d.py (per-box segment counts / triangle areas, CPU+CUDA),
            scaling.py (boundary removal + optimal window, shared by 2D/3D), offsets.py
 interface.py  contours -> segments      mixing.py  widths, Theta, energy budget

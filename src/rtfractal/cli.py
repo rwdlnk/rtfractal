@@ -116,45 +116,55 @@ def _plot_cmd(a):
 
 
 def _dimension_points(a):
-    """One box-counting dimension from a 2D point set (x y per line)."""
+    """One box-counting dimension from a 2D or 3D point set (x y [z] per line)."""
     import numpy as np
 
     from . import fractal
-    from .boxcount import points2d, scaling
+    from .boxcount import points2d, points3d, scaling
 
     try:
-        pts = segio.read_points(a.file)
+        pts = segio.read_points(a.file, dim=a.dim)
         d = segio.describe_points(pts)
     except (ValueError, OSError) as e:
         sys.exit(f'rtfractal dimension: {e}')
+    dim = d['dim']
     be = backend.resolve(a.backend)
-    min_box = a.min_box if a.min_box is not None else 2.0 * d['spacing']
-    max_box = a.max_box if a.max_box is not None else d['extent'] / 8
+    small = a.min_box if a.min_box is not None else 2.0 * d['spacing']
+    large = a.max_box if a.max_box is not None else d['extent'] / 8
 
     print(f"rtfractal {__version__}: {os.path.abspath(a.file)}")
-    print(f"  {d['n']} points  x [{d['x_min']:.6g}, {d['x_max']:.6g}]  "
-          f"y [{d['y_min']:.6g}, {d['y_max']:.6g}]  extent {d['extent']:.6g}")
+    axes = ' '.join(f"{'xyz'[i]} [{d['lo'][i]:.6g}, {d['hi'][i]:.6g}]" for i in range(dim))
+    print(f"  {d['n']} points, {dim}D  {axes}  extent {d['extent']:.6g}")
     print(f"  nearest-neighbour spacing: median {d['spacing']:.4g}  "
           f"mean {d['spacing_mean']:.4g}  min {d['spacing_min']:.4g}")
-    print(f"  ladder: min_box={min_box:.6g}"
+    print(f"  ladder: smallest={small:.6g}"
           f"{'' if a.min_box is not None else ' (2x spacing, default)'} "
-          f"max_box={max_box:.6g}{'' if a.max_box is not None else ' (extent/8, default)'} "
+          f"largest={large:.6g}{'' if a.max_box is not None else ' (extent/8, default)'} "
           f"factor={a.factor}  offsets={a.offsets} trim={a.trim} backend={be}")
     if d['extent'] > 1.0 or d['extent'] < 0.01:
         print(f"  WARNING: extent is {d['extent']:.4g}. The covering-offset count switches on "
               f"absolute box sizes (0.005, 0.02), so results are not scale invariant; compare "
               f"only with runs at a similar extent, or rescale to match.")
-    if min_box < 4.0 * d['spacing']:
-        print(f"  NOTE: min_box is {min_box / d['spacing']:.1f}x the spacing. A point set "
+    if small < 4.0 * d['spacing']:
+        print(f"  NOTE: the smallest box is {small / d['spacing']:.1f}x the spacing. A point set "
               f"saturates as the box approaches the spacing, where every box holds one point "
-              f"and D falls toward 0. Measured on a uniform cloud, D reads about 0.1 low at "
-              f"2x spacing and is best near 4x.")
+              f"and D falls toward 0.")
 
     try:
-        res = fractal.dimension_of_points(pts, min_box, max_box, a.factor, be, a.offsets,
-                                          a.trim, d['spacing'], a.allow_below_spacing)
-        sizes, counts, _ = points2d.box_counting_2d_points(
-            pts, min_box, max_box, a.factor, be, a.offsets, d['spacing'], a.allow_below_spacing)
+        if dim == 2:
+            res = fractal.dimension_of_points(pts, small, large, a.factor, be, a.offsets,
+                                              a.trim, d['spacing'], a.allow_below_spacing)
+            sizes, counts, _ = points2d.box_counting_2d_points(
+                pts, small, large, a.factor, be, a.offsets, d['spacing'], a.allow_below_spacing)
+        else:
+            res = fractal.dimension_of_points_3d(
+                pts, initial=large, factor=a.factor, num_steps=a.num_steps, min_delta=small,
+                backend=be, offsets=a.offsets, trim=a.trim, spacing=d['spacing'],
+                allow_below_spacing=a.allow_below_spacing)
+            sizes, counts, _ = points3d.box_counting_3d_points(
+                pts, initial=large, factor=a.factor, num_steps=a.num_steps, min_delta=small,
+                backend=be, offsets=a.offsets, spacing=d['spacing'],
+                allow_below_spacing=a.allow_below_spacing)
     except ValueError as e:
         sys.exit(f'rtfractal dimension: {e}')
 
@@ -293,6 +303,11 @@ def main(argv=None):
                    help='grid-origin offsets: covering (default) or legacy (biased high)')
     d.add_argument('--trim', choices=['r2', 'legacy'], default='r2', help='end-point trim test (default r2)')
     d.add_argument('--backend', choices=['auto', 'cpu', 'cuda'], default=None, help='default auto')
+    d.add_argument('--dim', type=int, choices=[2, 3], default=None,
+                   help='--as points: 2 or 3 leading columns are the coordinates '
+                        '(default: 2 columns means 2D, 3 means 3D, more is an error)')
+    d.add_argument('--num-steps', type=int, default=20,
+                   help='--as points in 3D: maximum ladder steps (default 20)')
     d.add_argument('--allow-below-spacing', action='store_true',
                    help='--as points: allow a smallest box below the nearest-neighbour spacing, '
                         'where the count saturates and D collapses toward 0. Refused otherwise.')

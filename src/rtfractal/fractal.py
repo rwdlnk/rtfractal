@@ -4,7 +4,7 @@ import numpy as np
 from . import interface
 from .boxcount import scaling
 from .boxcount.offsets import offset_fractions
-from .boxcount import points2d
+from .boxcount import points2d, points3d
 from .boxcount.segments2d import box_counting_2d
 from .boxcount.triangles3d import box_counting_3d
 
@@ -48,6 +48,31 @@ def dimension_of_points(pts, min_box=None, max_box=None, factor=1.5, backend=Non
     res = scaling.dimension_2d(sizes, counts, trim)
     res['bounding_box'] = bbox
     res['spacing'] = spacing
+    res['n_points'] = len(pts)
+    return res
+
+
+def dimension_of_points_3d(pts, initial=None, factor=1.5, num_steps=20, min_delta=None,
+                           max_delta=None, backend=None, log=None, offsets='covering',
+                           trim='r2', spacing=None, allow_below_spacing=False):
+    """Box-counting dimension of a 3D POINT SET.  -> the dimension_3d dict plus
+    `spacing` and `n_points`.
+
+    Same hard lower bound as in 2D: below the nearest-neighbour spacing the
+    count saturates at n and the dimension collapses toward 0.  For a cloud
+    sampling a surface the nearest-neighbour distance IS the surface sampling
+    density, which is the scale that matters; nothing is derived from the
+    bounding-box volume.
+    """
+    pts = np.asarray(pts, dtype=np.float64)
+    if len(pts) < 2:
+        return dict(NAN_RESULT, spacing=np.nan, n_points=len(pts))
+    deltas, counts, bbox = points3d.box_counting_3d_points(
+        pts, initial, factor, num_steps, min_delta, max_delta, backend, log, offsets,
+        spacing, allow_below_spacing)
+    res = scaling.dimension_3d(deltas, counts, trim)
+    res['bounding_box'] = bbox
+    res['spacing'] = spacing if spacing is not None else points3d.nn_spacing(pts)
     res['n_points'] = len(pts)
     return res
 
