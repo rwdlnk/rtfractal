@@ -27,6 +27,7 @@ import pandas as pd
 import pytest
 
 from rtfractal import backend, interface, multifractal
+from rtfractal.shapes import koch
 from rtfractal.boxcount.measures2d import SegmentMeasure
 from rtfractal.boxcount.measures3d import TriangleMeasure, grid_optimized_measure
 from rtfractal.io.case import open_case
@@ -65,18 +66,6 @@ def _tmp(name):
 
 
 # ===================================================================== unit
-def koch(level, L=0.4, y0=0.25):
-    pts = np.array([[0.0, y0], [L, y0]])
-    rot = np.array([[0.5, -np.sqrt(3) / 2], [np.sqrt(3) / 2, 0.5]])
-    for _ in range(level):
-        new = [pts[0]]
-        for a, b in zip(pts[:-1], pts[1:]):
-            d = (b - a) / 3
-            new += [a + d, a + d + rot @ d, a + 2 * d, b]
-        pts = np.array(new)
-    return np.hstack([pts[:-1], pts[1:]])
-
-
 def plane_mesh(n=60, L=0.4, y=0.25, tilt=0.0):
     xs = np.linspace(0, L, n)
     X, Z = np.meshgrid(xs, xs / 2)

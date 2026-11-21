@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from rtfractal import backend
+from rtfractal.shapes import koch
 from rtfractal.boxcount import scaling
 from rtfractal.boxcount.segments2d import SegmentCounter, box_counting_2d
 from rtfractal.boxcount.triangles3d import TriangleCounter, box_counting_3d
@@ -13,18 +14,6 @@ from rtfractal.io.case import open_case
 from rtfractal.io.mesh import TriangleMesh, load_mesh
 
 needs_cuda = pytest.mark.skipif(not backend.cuda_available(), reason='no CUDA device')
-
-
-def koch(level, L=0.4, y0=0.25):
-    pts = np.array([[0.0, y0], [L, y0]])
-    rot = np.array([[0.5, -np.sqrt(3) / 2], [np.sqrt(3) / 2, 0.5]])
-    for _ in range(level):
-        new = [pts[0]]
-        for a, b in zip(pts[:-1], pts[1:]):
-            d = (b - a) / 3
-            new += [a + d, a + d + rot @ d, a + 2 * d, b]
-        pts = np.array(new)
-    return np.hstack([pts[:-1], pts[1:]])
 
 
 def plane_mesh(n=40, L=0.4, y=0.25, tilt=0.0):
