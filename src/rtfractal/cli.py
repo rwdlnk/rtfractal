@@ -205,6 +205,66 @@ def _dimension_points(a):
         print(f"  ladder written to {a.csv}")
 
 
+def _interface(a):
+    """Cao midpoint interfaces from LAMMPS dump files."""
+    import glob
+
+    import numpy as np
+
+    from .io import lammps
+
+    files = []
+    for pattern in a.dumps:
+        files.extend(sorted(glob.glob(pattern)) if any(c in pattern for c in '*?[') else [pattern])
+    files = [f for f in files if os.path.isfile(f)]
+    if not files:
+        sys.exit(f'rtfractal interface: no dump files matched {" ".join(a.dumps)}')
+    try:
+        types = tuple(int(t) for t in a.types.split(','))
+        exclude = tuple(int(t) for t in a.exclude.split(',')) if a.exclude else ()
+    except ValueError:
+        sys.exit('rtfractal interface: --types and --exclude take comma-separated integers')
+
+    os.makedirs(a.outdir, exist_ok=True)
+    print(f"rtfractal {__version__}: {len(files)} dump file(s) -> {os.path.abspath(a.outdir)}")
+    print(f"  Cao midpoints between types {types[0]} and {types[1]}"
+          f"{f', excluding {exclude}' if exclude else ''}: "
+          f"cutoff {a.cutoff} sigma, angular filter {a.angle} deg, "
+          f"dedup {a.dedup} sigma, <= {a.max_neighbours} neighbours")
+
+    rows = []
+    for path in files:
+        try:
+            frames = list(lammps.read_frames(path))
+        except (OSError, ValueError) as e:
+            sys.exit(f'rtfractal interface: {e}')
+        if not frames:
+            print(f"  {os.path.basename(path)}: no frames, skipped")
+            continue
+        for frame in frames:
+            try:
+                pts = lammps.extract_interface(
+                    frame, types=types, exclude=exclude, dim=a.dim, cutoff=a.cutoff,
+                    angle=a.angle, max_neighbours=a.max_neighbours, dedup=a.dedup)
+            except ValueError as e:
+                sys.exit(f'rtfractal interface: {e}')
+            out = os.path.join(a.outdir, f'interface_t{frame.timestep:08d}.csv')
+            lammps.write_interface(pts, out)
+            rows.append((frame.timestep, frame.n_atoms, len(pts)))
+            print(f"  timestep {frame.timestep:9d}: {frame.n_atoms:8d} atoms -> "
+                  f"{len(pts):7d} midpoints")
+
+    summary = os.path.join(a.outdir, 'extraction_summary.csv')
+    with open(summary, 'w') as fh:
+        fh.write('step,n_atoms,n_interface_points\n')
+        for step, n_atoms, n_pts in rows:
+            fh.write(f'{step},{n_atoms},{n_pts}\n')
+    print(f"  {len(rows)} snapshot(s); summary in {summary}")
+    if rows:
+        print("  count one with: rtfractal dimension "
+              f"{os.path.join(a.outdir, 'interface_t*.csv')} --as points")
+
+
 def _dimension(a):
     """One box-counting dimension from a plain segment or polyline file."""
     import numpy as np
@@ -272,6 +332,10 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog='rtfractal', description=__doc__)
     p.add_argument('--version', action='version', version=__version__)
     sub = p.add_subparsers(dest='cmd', required=True)
+    from .io import lammps as _lammps
+    lammps_defaults = dict(cutoff=_lammps.DEFAULT_CUTOFF, angle=_lammps.DEFAULT_ANGLE,
+                           max_neighbours=_lammps.DEFAULT_MAX_NEIGHBOURS,
+                           dedup=_lammps.DEFAULT_DEDUP)
     a = sub.add_parser('analyze', help='analyse a SOLA-VOF, OpenFOAM or rtlbm case (2D or 3D, auto-detected)')
     a.add_argument('case')
     a.add_argument('--phases', default='1,2,3',
@@ -309,6 +373,28 @@ def main(argv=None):
     a.add_argument('--no-plots', action='store_true', help='write the data files only (no figures)')
     a.add_argument('--dpi', type=int, default=None, help='figure resolution (default 300, as legacy)')
     a.set_defaults(func=_analyze)
+
+    i = sub.add_parser('interface',
+                       help="Cao midpoint interface from LAMMPS dump files (writes interface_t*.csv)")
+    i.add_argument('dumps', nargs='+', help='dump files, or glob patterns in quotes')
+    i.add_argument('--outdir', default='interfaces', help='default: ./interfaces')
+    i.add_argument('--types', default='1,2',
+                   help='the two atom types whose interface this is (default 1,2)')
+    i.add_argument('--exclude', default='3',
+                   help='atom types to drop first, such as walls (default 3; empty for none)')
+    i.add_argument('--dim', type=int, choices=[2, 3], default=2,
+                   help='coordinate columns to use (default 2)')
+    i.add_argument('--cutoff', type=float, default=lammps_defaults['cutoff'],
+                   help='cross-type neighbour cutoff in sigma (default 1.8)')
+    i.add_argument('--angle', type=float, default=lammps_defaults['angle'],
+                   help="angular filter in degrees, Cao appendix III (default 30; 0 disables)")
+    i.add_argument('--max-neighbours', type=int, default=lammps_defaults['max_neighbours'],
+                   help='neighbours considered per atom before filtering (default 10)')
+    i.add_argument('--dedup', type=float, default=lammps_defaults['dedup'],
+                   help='merge midpoints closer than this, in sigma (default 0.1). Each pair '
+                        'yields its midpoint from both sides, so this is a coincidence '
+                        'threshold and not a smoothing length')
+    i.set_defaults(func=_interface)
 
     d = sub.add_parser('dimension', help='box-counting dimension of a plain segment or polyline file')
     d.add_argument('file', help='text/CSV, 4 columns "x1 y1 x2 y2" per line, or 2 columns of ordered '
