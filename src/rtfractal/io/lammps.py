@@ -11,6 +11,12 @@ measures the cloud density (D -> 2), not interface geometry.  To get a
 fractal dimension, reduce the cloud to a 1D curve with `reduce_to_curve`
 (median y per x-bin), convert to segments with `curve_to_segments`, and
 count with `boxcount.segments2d`.
+
+In 3D the dump reader and midpoint extraction already work (pass dim=3),
+but there is no surface reconstruction step yet.  The 3D pipeline would
+need: midpoint cloud -> triangulated surface (alpha shape or similar) ->
+`boxcount.triangles3d`.  Not needed for the current PRA or JFM papers
+(3D Cao used continuum isosurfaces, not MD midpoints).
 """
 import os
 import re

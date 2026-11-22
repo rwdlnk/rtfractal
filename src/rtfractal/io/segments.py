@@ -37,6 +37,10 @@ def read_columns(path):
     with open(path) as fh:
         for lineno, line in enumerate(fh, 1):
             s = line.strip()
+            if not rows and s.startswith('ITEM: '):
+                raise ValueError(
+                    f'{path} is a LAMMPS dump, which holds atoms and not an interface. '
+                    f'Build the interface first: rtfractal interface {path}')
             if not s or s[0] in '#%':
                 continue
             parts = [p for p in _SPLIT.split(s) if p]
