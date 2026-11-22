@@ -54,26 +54,6 @@ def _need(*paths):
         if not os.path.exists(p):
             pytest.skip(f'missing {p}')
 
-def _need_an_independent_legacy_analyzer():
-    """Skip when the legacy analyzer is no longer independent of rtfractal.
-
-    FractalParameterAI 8ad729e (2026-11-21) rewired
-    `rt_analyzer.compute_fractal_dimension` to call rtfractal itself, with
-    covering offsets and max box L/8.  A bit-identity test against it then
-    compares rtfractal in legacy mode against rtfractal in default mode and
-    fails by construction: at LBM 160x200, t = 10, 1.7177 against 1.4396.
-    That is the known offset correction and not a regression.
-
-    To run these tests again, point them at a legacy analyzer from before
-    that commit, for example by checking out 869103d into a worktree and
-    setting RTFRACTAL_LEGACY_REPOS to it.
-    """
-    import rt_analyzer as _ra
-    if getattr(_ra, '_HAS_RTFRACTAL', False):
-        pytest.skip('the legacy analyzer now calls rtfractal itself '
-                    '(FractalParameterAI 8ad729e); nothing independent left to compare against')
-
-
 
 def _same(a, b):
     return a == b or (np.isnan(a) and np.isnan(b))
@@ -225,14 +205,10 @@ def test_phase2_run_2d_writes_legacy_layout(tmp_path):
 
 # =============================================================== regression
 @pytest.fixture(scope='module')
-def legacy2d():
-    _need(f'{REPOS}/FractalParameterAI', f'{REPOS}/FractalAnalyzer')
-    sys.path[:0] = [f'{REPOS}/FractalParameterAI/rt_analyzer', f'{REPOS}/FractalAnalyzer']
-    logging.disable(logging.CRITICAL)
-    from rt_analyzer import RTAnalyzer
-    _need_an_independent_legacy_analyzer()
+def legacy2d(legacy_rtanalyzer):
+    """The analyzer pinned in conftest.py, not whatever sits in the sibling tree."""
     with contextlib.redirect_stdout(io.StringIO()):
-        return RTAnalyzer(output_dir=_tmp('legacy_rt_out'))
+        return legacy_rtanalyzer(output_dir=_tmp('legacy_rt_out'))
 
 
 def _legacy_phase1_boxes(A, dl, xc):
@@ -340,10 +316,11 @@ def test_2d_pipeline_files_identical_to_legacy_driver(legacy2d, path):
 
 
 @pytest.fixture(scope='module')
-def legacy3d():
-    _need(f'{REPOS}/3D-FractalParameterAI', f'{REPOS}/FractalParameterAI', LBM3D)
+def legacy3d(legacy_rt_analyzer_dir):
+    """fractal3d, with the pinned rt_analyzer beside it for its rt_physics."""
+    _need(f'{REPOS}/3D-FractalParameterAI', LBM3D)
     sys.path.insert(0, f'{REPOS}/3D-FractalParameterAI')
-    sys.path.insert(0, f'{REPOS}/FractalParameterAI/rt_analyzer')
+    sys.path.insert(0, legacy_rt_analyzer_dir)
     import fractal3d
     return fractal3d
 

@@ -34,36 +34,13 @@ def _need(*paths):
         if not os.path.exists(p):
             pytest.skip(f'missing {p}')
 
-def _need_an_independent_legacy_analyzer():
-    """Skip when the legacy analyzer is no longer independent of rtfractal.
-
-    FractalParameterAI 8ad729e (2026-11-21) rewired
-    `rt_analyzer.compute_fractal_dimension` to call rtfractal itself, with
-    covering offsets and max box L/8.  A bit-identity test against it then
-    compares rtfractal in legacy mode against rtfractal in default mode and
-    fails by construction: at LBM 160x200, t = 10, 1.7177 against 1.4396.
-    That is the known offset correction and not a regression.
-
-    To run these tests again, point them at a legacy analyzer from before
-    that commit, for example by checking out 869103d into a worktree and
-    setting RTFRACTAL_LEGACY_REPOS to it.
-    """
-    import rt_analyzer as _ra
-    if getattr(_ra, '_HAS_RTFRACTAL', False):
-        pytest.skip('the legacy analyzer now calls rtfractal itself '
-                    '(FractalParameterAI 8ad729e); nothing independent left to compare against')
-
-
 
 @pytest.fixture(scope='module')
-def legacy2d():
-    _need(f'{REPOS}/FractalParameterAI', f'{REPOS}/FractalAnalyzer')
-    sys.path[:0] = [f'{REPOS}/FractalParameterAI/rt_analyzer', f'{REPOS}/FractalAnalyzer']
-    logging.disable(logging.CRITICAL)
-    from rt_analyzer import RTAnalyzer
-    _need_an_independent_legacy_analyzer()
+def legacy2d(legacy_rtanalyzer):
+    """The analyzer pinned in conftest.py, not whatever sits in the sibling tree."""
     with contextlib.redirect_stdout(io.StringIO()):
-        return RTAnalyzer(output_dir=os.path.join(os.environ.get('TMPDIR', '/tmp'), 'rtfractal_legacy_out'))
+        return legacy_rtanalyzer(
+            output_dir=os.path.join(os.environ.get('TMPDIR', '/tmp'), 'rtfractal_legacy_out'))
 
 
 @pytest.mark.parametrize('path', [LBM2D, SVOF])
