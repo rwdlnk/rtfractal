@@ -61,7 +61,8 @@ def _analyze(a):
             _plot(2, case, out, a)
         if 3 in phases:
             print("\nPhase 3: spectra + velocity statistics")
-            phase3.run_2d(case, out, times=mf_times, tke=a.tke, spectrum=a.spectrum)   # legacy 2D: --mf-times
+            phase3.run_2d(case, out, times=mf_times, tke=a.tke, spectrum=a.spectrum,
+                          dissipation=a.dissipation, nu=_nu_pair(a.nu))   # legacy 2D: --mf-times
             _plot(3, case, out, a)
     else:
         if 1 in phases:
@@ -74,7 +75,8 @@ def _analyze(a):
             _plot(2, case, out, a)
         if 3 in phases:
             print("\nPhase 3: spectra + velocity statistics")
-            phase3.run_3d(case, out, times=[float(t) for t in a.spec_times.split(',')], spectrum=a.spectrum)
+            phase3.run_3d(case, out, times=[float(t) for t in a.spec_times.split(',')],
+                          spectrum=a.spectrum, dissipation=a.dissipation)
             _plot(3, case, out, a)
 
 
@@ -328,6 +330,16 @@ def _dimension(a):
         print(f"  ladder written to {a.csv}")
 
 
+def _nu_pair(text):
+    """'1.044e-6,1.005e-6' -> (nu_heavy, nu_light), or None."""
+    if not text:
+        return None
+    parts = text.split(',')
+    if len(parts) != 2:
+        raise SystemExit('--nu takes exactly two comma-separated values: NU_HEAVY,NU_LIGHT')
+    return (float(parts[0]), float(parts[1]))
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog='rtfractal', description=__doc__)
     p.add_argument('--version', action='version', version=__version__)
@@ -366,6 +378,13 @@ def main(argv=None):
     a.add_argument('--legacy', action='store_true',
                    help='reproduce FractalParameterAI exactly: --offsets/--ladder/--trim/--tke legacy --spectrum P')
     a.add_argument('--skip-energy', action='store_true', help='3D: skip the PE/BPE/KE budget (no U read)')
+    a.add_argument('--dissipation', action='store_true',
+                   help='phase 3: also compute eps, enstrophy and the Kolmogorov scale into '
+                        'analysis/dissipation/. Off by default: it holds nine gradient arrays at '
+                        'once, about 5 GB at 400x500x200')
+    a.add_argument('--nu', default=None, metavar='NU_HEAVY,NU_LIGHT',
+                   help='override the viscosities used by --dissipation (default: the case\'s own). '
+                        "paper 1's SOLA-VOF rows used OpenFOAM's pair, 1.044e-6,1.005e-6")
     a.add_argument('--allow-missing-fields', action='store_true',
                    help='3D: proceed when some snapshots have an interface mesh but no reconstructed '
                         'time directory. Their fractal dimensions are valid; their mixing widths, '

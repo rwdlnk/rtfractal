@@ -21,6 +21,16 @@ reference values) are in `../RT_ANALYSIS_TOOLS.md`.
 - **Dev venv:** `.venv` (current numpy/numba). Run `.venv/bin/python -m pytest -q`.
 - **Phases 1–3 are ported** (`pipeline/phase{1,2,3}.py`); `tests/test_phase{2,3}.py`
   hold their live bit-identity tests (`pytest` takes about 3 minutes).
+- **Dissipation (`dissipation.py`) is phase 3's, and is opt-in.**
+  `run_2d/run_3d(..., dissipation=True)`, or `--dissipation`, writes
+  `analysis/dissipation/`. Default off for two reasons: it holds nine
+  gradient arrays at once (about 5 GB at 400x500x200), and the phase-3
+  regression tests compare the full CSV listing of `spectra/` and
+  `velocity/`, so its output goes in a directory of its own. Ported from
+  paper 1's `scripts_paper1_revision/dissip{,3d,_svof}.py` and bit-identical
+  to all three. Two traps it inherits deliberately: `dx` is `L/nx`, never a
+  difference of two cell centres (that costs 1-2 ulp everywhere), and the
+  volume fraction must be oriented heavy-phase-is-one before it goes in.
 - **Plots are ported** (`plots/`, `tests/test_plots.py`). They're drawn
   from files on disk only: the legacy CSVs plus `rtfractal_run.json` and
   `plotdata/` (`plotdata.py`).

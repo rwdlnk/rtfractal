@@ -44,6 +44,7 @@ import time as _time
 import numpy as np
 import pandas as pd
 
+from .. import dissipation as _dissipation
 from .. import plotdata, spectra, velocity
 from ..io.case import Snapshot
 
@@ -92,12 +93,40 @@ def spectrum_summary_row(sr, spectrum='E'):
     return row
 
 
-def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print, tke='uv', spectrum='E'):
+def case_viscosities(case, nu=None):
+    """(nu_heavy, nu_light) for `case`, or `nu` passed straight through.
+
+    OpenFOAM cases carry both, read from physicalProperties.  SOLA-VOF's
+    input file carries ONE viscosity, so both come back equal -- which is not
+    what paper 1 did: its SOLA-VOF dissipation rows were measured with
+    OpenFOAM's pair (1.044e-6, 1.005e-6) on purpose, so that the three codes
+    are compared under the same nu(a) law rather than each under its own.
+    Reproducing those rows means passing `nu` explicitly.
+    """
+    if nu is not None:
+        return float(nu[0]), float(nu[1])
+    p = case.params
+    if 'nu_heavy' in p:
+        return float(p['nu_heavy']), float(p['nu_light'])
+    if 'NUC' in p:
+        return float(p['NU']), float(p['NUC'])
+    return float(p['NU']), float(p['NU'])
+
+
+def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print, tke='uv', spectrum='E',
+           dissipation=False, nu=None):
     """Dalziel slab spectrum, 2D radial spectra of F/u/v, the TKE spectrum
     and whole-field velocity statistics at the snapshots nearest `times`.
     tke='uv' (default): spectrum of 1/2(u'^2 + v'^2); tke='legacy': the
     legacy u-only spectrum (see spectra.tke_spectrum_2d).  spectrum='E'
     (default) or 'P' selects the radial-spectrum convention (module notes).
+
+    `dissipation=True` also computes eps, enstrophy and the Kolmogorov scale
+    (rtfractal.dissipation) and writes analysis/dissipation/dissipation_2d.csv.
+    `nu=(nu_heavy, nu_light)` overrides the case's own viscosities; see
+    case_viscosities.  Note that this samples the phase-3 times, whereas
+    paper 1's 2D table averages over a band of matched integral width, which
+    is a sampling decision for the caller and not part of the measurement.
 
     Returns dict(summary=DataFrame, velocity=DataFrame or None,
     results=[per-time dict with 'time', 'tau', 'dalziel_spectrum',
@@ -126,7 +155,13 @@ def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print, tke='uv', spec
     pictures = {id(plotdata.nearest(case.snapshots, tt)): None
                 for tt in plotdata.velocity_snapshot_targets([s.t for s in used])}
 
-    results, vel_rows = [], []
+    diss_dir = os.path.join(analysis_dir, 'dissipation')
+    if dissipation:
+        os.makedirs(diss_dir, exist_ok=True)
+        nu_h, nu_l = case_viscosities(case, nu)
+        log(f"  dissipation: nu_heavy={nu_h:.4e}, nu_light={nu_l:.4e} m2/s")
+
+    results, vel_rows, diss_rows = [], [], []
     for target_t in times:
         snap = min(case.snapshots, key=lambda s: abs(s.t - target_t))
         data = case.read_2d(snap, fields=('F', 'U', 'V'))
@@ -176,6 +211,43 @@ def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print, tke='uv', spec
                 'velocity_mag_max', 'velocity_mag_mean')}})
             log(f"    Velocity: u_rms={vs['u_rms']:.4e}, v_rms={vs['v_rms']:.4e}, "
                 f"TKE={vs['TKE']:.4e}, |V|_max={vs['velocity_mag_max']:.4e}")
+
+            if dissipation:
+                # This module's 2D fields are (nx, ny); the dissipation kernel
+                # wants (ny, nx), as the ported scripts had them, and wants
+                # them contiguous so that a mean over a slice sums in the same
+                # order.  `f` is oriented so that f = 1 is the HEAVY phase:
+                # alpha.water already is, a SOLA-VOF F may not be.
+                ff = np.ascontiguousarray(data['f'].T)
+                if ff[:ff.shape[0] // 2].mean() > ff[ff.shape[0] // 2:].mean():
+                    ff = 1.0 - ff
+                # L/nx and H/ny, not a difference of two cell centres:
+                # differencing centres loses a bit (0.0024999999999999996
+                # where the ported scripts have 0.0025), and that 1-2 ulp
+                # propagates into h99, eps and every ratio built on them.
+                dx2 = float(case.params['L']) / ff.shape[1]
+                dy2 = float(case.params['H']) / ff.shape[0]
+                dstat = _dissipation.dissipation_stats_2d(
+                    np.ascontiguousarray(data['U'].T),
+                    np.ascontiguousarray(data['V'].T),
+                    ff, dx2, dy2, nu_h, nu_l)
+                if dstat is None:
+                    log("    dissipation: no mixing zone at this time")
+                else:
+                    sr['dissipation'] = dstat
+                    diss_rows.append({
+                        'time': t, 'tau': tau, 'nx': ff.shape[1], 'ny': ff.shape[0],
+                        'dx_mm': 1000.0 * dx2,
+                        'h99': dstat['h99'], 'hint': dstat['hint'],
+                        'urms': dstat['urms'], 'Re_h': dstat['Re_h'],
+                        'eps_mix': dstat['eps_mix'], 'eps_dom': dstat['eps_dom'],
+                        'ens_mix': dstat['ens_mix'],
+                        'eta_mm': 1000.0 * dstat['eta'],
+                        'eta_over_dx': dstat['eta_over_dx'],
+                        'Re_cell': dstat['Re_cell'], 'nu_mix': dstat['nu_mix']})
+                    log(f"    dissipation: eps={dstat['eps_mix']:.4e} m2/s3, "
+                        f"eta/dx={dstat['eta_over_dx']:.2f}, "
+                        f"Re_dx={dstat['Re_cell']:.1f}, Re_h={dstat['Re_h']:.0f}")
         plotdata.save_radial_spectra(analysis_dir, sr, spectrum)
         results.append(sr)
 
@@ -188,12 +260,17 @@ def run_2d(case, analysis_dir, times=DEFAULT_TIMES_2D, log=print, tke='uv', spec
     if vel_rows:
         vel_df = pd.DataFrame(vel_rows)
         vel_df.to_csv(os.path.join(velocity_dir, 'velocity_statistics.csv'), index=False)
+    diss_df = None
+    if diss_rows:
+        diss_df = pd.DataFrame(diss_rows)
+        diss_df.to_csv(os.path.join(diss_dir, 'dissipation_2d.csv'), index=False)
+        log(f"  Wrote dissipation_2d.csv ({len(diss_rows)} timesteps)")
     summary = pd.DataFrame([spectrum_summary_row(sr, spectrum) for sr in results])
     out = os.path.join(spectra_dir, 'spectrum_summary.csv')
     summary.to_csv(out, index=False)
     log(f"Spectrum summary saved to {out}")
     plotdata.record_run(analysis_dir, case, 3, times=list(times), tke=tke, spectrum=spectrum)
-    return {'summary': summary, 'velocity': vel_df, 'results': results}
+    return {'summary': summary, 'velocity': vel_df, 'dissipation': diss_df, 'results': results}
 
 
 # ─── 3D ──────────────────────────────────────────────────────────────────────
@@ -203,15 +280,28 @@ def legacy_time_dir(case_path, t):
     return os.path.join(case_path, str(int(t)) if t == int(t) else f"{t}")
 
 
-def run_3d(case, analysis_dir, times=DEFAULT_TIMES_3D, log=print, spectrum='E'):
+def run_3d(case, analysis_dir, times=DEFAULT_TIMES_3D, log=print, spectrum='E',
+           dissipation=False):
     """Slab concentration spectrum, slab velocity/TKE spectra and horizontal
     velocity statistics (profiles + values at H0) at each target time.
 
-    Returns dict(spectrum=, tke=, velocity= DataFrames or None, results=[per-time
-    dict with 'time', 'tau' and 'spectrum', 'velocity', 'tke' when computed]).
-    None if no target time is within the data.
+    `dissipation=True` additionally computes eps, enstrophy and the
+    Kolmogorov scale (rtfractal.dissipation) and writes
+    analysis/dissipation/dissipation_3d.csv.  It is OFF by default for two
+    reasons: it holds nine gradient arrays at once, which is about 5 GB at
+    400x500x200, and the phase-3 regression tests compare the full CSV
+    listing of spectra/ and velocity/, so a new output goes in a directory of
+    its own rather than as extra columns on an existing file.
+
+    Returns dict(spectrum=, tke=, velocity=, dissipation= DataFrames or None,
+    results=[per-time dict with 'time', 'tau' and 'spectrum', 'velocity',
+    'tke', 'dissipation' when computed]).  None if no target time is within
+    the data.
     """
     spec_dir, vel_dir = _dirs(analysis_dir)
+    diss_dir = os.path.join(analysis_dir, 'dissipation')
+    if dissipation:
+        os.makedirs(diss_dir, exist_ok=True)
     p, g3, phys = case.params, case.grid, case.physics
     H, H0 = p['H'], case.H0
     y = g3.y_centers
@@ -223,7 +313,7 @@ def run_3d(case, analysis_dir, times=DEFAULT_TIMES_3D, log=print, spectrum='E'):
 
     spectra._check_convention(spectrum)
     sfx, fsfx = ('', '') if spectrum == 'P' else ('_E', '_E')
-    spec_rows, tke_rows, vel_rows, results = [], [], [], []
+    spec_rows, tke_rows, vel_rows, diss_rows, results = [], [], [], [], []
     for target_t in times:
         t0 = _time.time()
         tau = float(phys.nondim_time(target_t))
@@ -253,7 +343,11 @@ def run_3d(case, analysis_dir, times=DEFAULT_TIMES_3D, log=print, spectrum='E'):
                         os.path.join(spec_dir, f'spectrum{fsfx}_3d_t{target_t:.2f}.csv'), index=False)
                     log(f"    spectrum {spectrum}(k): slope_10_25={row[f'vof_slope{sfx}_10_25']:.3f}, "
                         f"slope_10_50={row[f'vof_slope{sfx}_10_50']:.3f}")
-                del alpha
+                if not dissipation:
+                    alpha = None   # eps needs it alongside U; see below.
+                    # Rebound rather than deleted: the cleanup at the end of
+                    # this iteration drops both fields by name, and a `del`
+                    # here would make that cleanup a NameError.
 
             U = None
             if os.path.exists(os.path.join(snap.path, 'U')):
@@ -290,16 +384,51 @@ def run_3d(case, analysis_dir, times=DEFAULT_TIMES_3D, log=print, spectrum='E'):
                     ref = '[KO -1.67, BO -2.20]' if spectrum == 'E' else '[P(k): KO -2.67, BO -3.20]'
                     log(f"    TKE spectrum {spectrum}(k): slope_10_50={trow[f'tke_slope{sfx}_10_50']:.3f} "
                         f"(R2={trow[f'tke_r2{sfx}_10_50']:.2f})  {ref}")
-                del U
+
+                if dissipation and alpha is not None:
+                    # alpha.water IS the heavy phase, so it goes in unflipped.
+                    # U is dropped first: the components are copied out of it
+                    # and the (nz, ny, nx, 3) original is the single largest
+                    # array here.
+                    uu = np.ascontiguousarray(U[..., 0])
+                    vv = np.ascontiguousarray(U[..., 1])
+                    ww = np.ascontiguousarray(U[..., 2])
+                    U = None
+                    dstat = _dissipation.dissipation_stats_3d(
+                        uu, vv, ww, alpha, g3.dx, g3.dy, g3.dz,
+                        p['nu_heavy'], p['nu_light'])
+                    del uu, vv, ww
+                    if dstat is None:
+                        log("    dissipation: no mixing zone at this time")
+                    else:
+                        res['dissipation'] = dstat
+                        diss_rows.append({
+                            'time': target_t, 'tau': tau,
+                            'nx': g3.nx, 'ny': g3.ny, 'nz': g3.nz,
+                            'dx_mm': 1000.0 * g3.dx,
+                            'h99': dstat['h99'], 'hint': dstat['hint'],
+                            'urms': dstat['urms'], 'Re_h': dstat['Re_h'],
+                            'eps_mix': dstat['eps_mix'], 'eps_dom': dstat['eps_dom'],
+                            'ens_mix': dstat['ens_mix'],
+                            'eta_mm': 1000.0 * dstat['eta'],
+                            'eta_over_dx': dstat['eta_over_dx'],
+                            'Re_cell': dstat['Re_cell'],
+                            'nu_mix': dstat['nu_mix']})
+                        log(f"    dissipation: eps={dstat['eps_mix']:.4e} m2/s3, "
+                            f"eta/dx={dstat['eta_over_dx']:.2f}, "
+                            f"Re_dx={dstat['Re_cell']:.1f}, Re_h={dstat['Re_h']:.0f}")
+                alpha = U = None
         except Exception as e:
             log(f"  WARNING: Phase 3 failed at t={target_t:.2f}: {e}")
         results.append(res)
         log(f"    ({_time.time() - t0:.1f}s)")
 
-    out = {'spectrum': None, 'tke': None, 'velocity': None, 'results': results}
+    out = {'spectrum': None, 'tke': None, 'velocity': None, 'dissipation': None,
+           'results': results}
     for key, rows, d, name in (('spectrum', spec_rows, spec_dir, 'spectrum_summary_3d.csv'),
                                ('velocity', vel_rows, vel_dir, 'velocity_summary_3d.csv'),
-                               ('tke', tke_rows, spec_dir, 'tke_spectrum_summary_3d.csv')):
+                               ('tke', tke_rows, spec_dir, 'tke_spectrum_summary_3d.csv'),
+                               ('dissipation', diss_rows, diss_dir, 'dissipation_3d.csv')):
         if rows:
             out[key] = pd.DataFrame(rows)
             out[key].to_csv(os.path.join(d, name), index=False)
