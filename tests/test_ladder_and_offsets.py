@@ -167,6 +167,82 @@ def test_a_narrow_window_is_recorded_as_a_fallback():
     assert res['window'] == 'fallback'
 
 
+# --------------------------------------------------------- window refusal
+def test_a_two_rung_ladder_is_refused_however_perfect_its_r2():
+    """Two points are collinear, so R^2 carries no information at all.
+
+    The ladder below is the one that exposed this: Koch level 5 counted
+    between extent/8 and extent/4 returns D = 1.0000 at R^2 = 1.0000, against
+    a true 1.2619, and nothing in the result said so.
+    """
+    segs = np.asarray(shapes.koch(5), dtype=np.float64)
+    ext = max(np.ptp(segs[:, [0, 2]]), np.ptp(segs[:, [1, 3]]))
+    sizes, counts, _ = segments2d.box_counting_2d(segs, ext / 8, ext / 4, 1.5,
+                                                  backend='cpu', offsets='covering')
+    assert len(sizes) == 2
+    res = scaling.dimension_2d(sizes, counts)
+    assert res['window'] == 'refused'
+    assert np.isnan(res['dimension']) and np.isnan(res['error'])
+    assert res['r_squared'] == pytest.approx(1.0, abs=1e-12)   # the trap, still visible
+    assert res['span_decades'] < 0.2
+
+
+def test_what_was_refused_stays_readable():
+    """Refusing is not the same as discarding: the ladder and R^2 remain."""
+    sizes = np.geomspace(1.0, 1.0 / 1.5, 2)
+    res = scaling.dimension_2d(sizes, 100.0 * sizes ** -1.4)
+    assert res['window'] == 'refused' and np.isnan(res['dimension'])
+    assert len(res['box_sizes']) == 2 and len(res['box_counts']) == 2
+    assert res['span_decades'] > 0
+
+
+def test_three_rungs_are_weak_but_not_refused():
+    """The floor is at two, not at four.
+
+    A factor-1.5 ladder across the Cao atomic window holds exactly three
+    rungs, and the ladder-sensitivity figure that window's analysis quotes is
+    measured from it.  Refusing three points would delete that measurement to
+    catch a case R^2 already cannot see.
+    """
+    sizes = np.geomspace(1.0, 1.0 / 1.5 ** 2, 3)
+    res = scaling.dimension_2d(sizes, 100.0 * sizes ** -1.4)
+    assert res['window'] != 'refused'
+    assert res['dimension'] == pytest.approx(1.4, abs=1e-9)
+
+
+def test_a_narrow_window_is_refused_only_when_asked():
+    """min_span is the strict setting and is off by default.
+
+    The default exists because a short window is not necessarily a wrong one:
+    at `160x200x80` a 3D ladder from two cells to L/8 is 0.70 decades after
+    trimming, and refusing it by default would delete a paper's coarsest grid
+    rather than flag it.
+    """
+    sizes = np.geomspace(2.5, 0.8, 10)          # 0.49 decades, the Cao window
+    counts = 100.0 * sizes ** -1.36
+    assert scaling.dimension_2d(sizes, counts)['dimension'] == pytest.approx(1.36, abs=1e-6)
+    strict = scaling.dimension_2d(sizes, counts, min_span=scaling.SPAN_MIN)
+    assert strict['window'] == 'refused' and np.isnan(strict['dimension'])
+    assert strict['r_squared'] == pytest.approx(1.0, abs=1e-9)
+
+
+def test_min_span_reaches_through_the_wrappers():
+    sizes = np.geomspace(2.5, 0.8, 10)
+    deltas = np.geomspace(0.8, 2.5, 10)
+    assert np.isnan(scaling.dimension_3d(deltas, 100.0 * deltas ** 2.3,
+                                         min_span=scaling.SPAN_MIN)['dimension'])
+    segs = np.asarray(shapes.koch(4), dtype=np.float64)
+    ext = max(np.ptp(segs[:, [0, 2]]), np.ptp(segs[:, [1, 3]]))
+    strict = fractal.dimension_of_segments(segs, ext / 50, ext / 8, 1.5, backend='cpu',
+                                           min_span=scaling.SPAN_MIN)
+    loose = fractal.dimension_of_segments(segs, ext / 50, ext / 8, 1.5, backend='cpu')
+    assert strict['span_decades'] == pytest.approx(loose['span_decades'])
+    if loose['span_decades'] < scaling.SPAN_MIN:
+        assert np.isnan(strict['dimension']) and not np.isnan(loose['dimension'])
+    else:
+        assert strict['dimension'] == pytest.approx(loose['dimension'])
+
+
 def test_a_wide_clean_ladder_selects_a_window():
     sizes = np.geomspace(100.0, 0.1, 30)
     counts = 100.0 * sizes ** -1.5

@@ -28,7 +28,7 @@ def _ladder_diagnostics(sizes, counts, n_points):
 
 
 def dimension_of_segments(segs, min_box, max_box=None, factor=1.5, backend=None, offsets='covering',
-                          trim='r2', num_sizes=None, sizes=None):
+                          trim='r2', num_sizes=None, sizes=None, min_span=0.0):
     if len(segs) == 0:
         return dict(NAN_RESULT)
     if max_box is None:
@@ -36,14 +36,14 @@ def dimension_of_segments(segs, min_box, max_box=None, factor=1.5, backend=None,
         max_box = ext / 8
     sizes, counts, bbox = box_counting_2d(segs, min_box, max_box, factor, backend, offsets,
                                           num_sizes, sizes)
-    res = scaling.dimension_2d(sizes, counts, trim)
+    res = scaling.dimension_2d(sizes, counts, trim, min_span)
     res['bounding_box'] = bbox
     return res
 
 
 def dimension_of_points(pts, min_box=None, max_box=None, factor=1.5, backend=None, offsets='covering',
                         trim='r2', spacing=None, allow_below_spacing=False,
-                        num_sizes=None, sizes=None):
+                        num_sizes=None, sizes=None, min_span=0.0):
     """Box-counting dimension of a 2D POINT SET.  -> the dimension_2d dict plus
     `spacing` and `n_points`.
 
@@ -65,7 +65,7 @@ def dimension_of_points(pts, min_box=None, max_box=None, factor=1.5, backend=Non
     ladder_sizes, ladder_counts, bbox = points2d.box_counting_2d_points(
         pts, min_box, max_box, factor, backend, offsets, spacing, allow_below_spacing,
         num_sizes, sizes)
-    res = scaling.dimension_2d(ladder_sizes, ladder_counts, trim)
+    res = scaling.dimension_2d(ladder_sizes, ladder_counts, trim, min_span)
     res['bounding_box'] = bbox
     res['spacing'] = spacing
     res['n_points'] = len(pts)
@@ -76,7 +76,7 @@ def dimension_of_points(pts, min_box=None, max_box=None, factor=1.5, backend=Non
 def dimension_of_points_3d(pts, initial=None, factor=1.5, num_steps=20, min_delta=None,
                            max_delta=None, backend=None, log=None, offsets='covering',
                            trim='r2', spacing=None, allow_below_spacing=False,
-                           num_sizes=None, sizes=None):
+                           num_sizes=None, sizes=None, min_span=0.0):
     """Box-counting dimension of a 3D POINT SET.  -> the dimension_3d dict plus
     `spacing` and `n_points`.
 
@@ -92,7 +92,7 @@ def dimension_of_points_3d(pts, initial=None, factor=1.5, num_steps=20, min_delt
     deltas, counts, bbox = points3d.box_counting_3d_points(
         pts, initial, factor, num_steps, min_delta, max_delta, backend, log, offsets,
         spacing, allow_below_spacing, num_sizes, sizes)
-    res = scaling.dimension_3d(deltas, counts, trim)
+    res = scaling.dimension_3d(deltas, counts, trim, min_span)
     res['bounding_box'] = bbox
     res['spacing'] = spacing if spacing is not None else points3d.nn_spacing(pts)
     res['n_points'] = len(pts)
@@ -101,19 +101,20 @@ def dimension_of_points_3d(pts, initial=None, factor=1.5, num_steps=20, min_delt
 
 
 def dimension_2d(field, level=0.5, min_box=0.001, max_box=None, factor=1.5, backend=None, offsets='covering',
-                 trim='r2'):
+                 trim='r2', min_span=0.0):
     """Dimension of the `level` contour of field['f'] (legacy RTAnalyzer.compute_fractal_dimension)."""
     segs = interface.segments(interface.contours(field['f'], field['x'], field['y'], level))
-    res = dimension_of_segments(segs, min_box, max_box, factor, backend, offsets, trim)
+    res = dimension_of_segments(segs, min_box, max_box, factor, backend, offsets, trim,
+                                min_span=min_span)
     res['n_segments'] = len(segs)
     return res
 
 
 def dimension_3d(mesh, initial, factor=1.5, num_steps=20, min_delta=None, backend=None, log=None, offsets='covering',
-                 trim='r2'):
+                 trim='r2', min_span=0.0):
     deltas, counts = box_counting_3d(mesh, initial, factor, num_steps, min_delta, backend=backend, log=log,
                                      offsets=offsets)
-    return scaling.dimension_3d(deltas, counts, trim)
+    return scaling.dimension_3d(deltas, counts, trim, min_span)
 
 
 def projected_dimension(mesh, dx, dy):
