@@ -117,6 +117,45 @@ def dimension_3d(mesh, initial, factor=1.5, num_steps=20, min_delta=None, backen
     return scaling.dimension_3d(deltas, counts, trim, min_span)
 
 
+def dimension_3d_field(alpha, grid, level=0.5, initial=None, factor=1.5, num_steps=20, min_delta=None,
+                       backend=None, log=None, offsets='covering', trim='r2', min_span=0.0):
+    """Dimension of the `level` iso-surface of a 3D field, marched out of the field.
+
+    The three-dimensional sibling of `dimension_2d`.  That function
+    marching-squares the field at the mesh scale and counts boxes on the
+    segments; this one marching-cubes it at the mesh scale and counts cubes on
+    the triangles, through the same ladder, the same covering offsets and the
+    same end-point trim, so the only difference from `dimension_3d` is where
+    the surface came from.
+
+    Use `dimension_3d` on `io.mesh.load_mesh` output, not this, for the
+    Marstrand codimension test.  Run end to end on the field that test
+    overshoots unity by seven to sixteen per cent, falling with refinement but
+    still seven to nine per cent high at the finest grid, because marching
+    cubes on a one-to-two-cell transition band inflates a 3D count by two and a
+    half to four times what it inflates a plane section.  `interface` carries
+    the numbers.  What this function is for is a 3D dimension commensurable with
+    something else measured on the field, and the case where no surface was
+    written out at all.
+
+    Defaults match what the pipeline uses for the extracted surface: a largest
+    cube of one eighth of the x extent and a smallest of twice the coarsest
+    mesh spacing.  Returns the `dimension_3d` dict plus `n_triangles` and
+    `surface_area`, the latter being the area of the marched surface and not
+    of the solver's.
+    """
+    m = interface.isosurface(alpha, grid, level)
+    if initial is None:
+        initial = grid.nx * grid.dx / 8.0
+    if min_delta is None:
+        min_delta = 2.0 * max(grid.dx, grid.dy, grid.dz)
+    res = dimension_3d(m, initial=initial, factor=factor, num_steps=num_steps, min_delta=min_delta,
+                       backend=backend, log=log, offsets=offsets, trim=trim, min_span=min_span)
+    res['n_triangles'] = m.n_triangles
+    res['surface_area'] = m.surface_area
+    return res
+
+
 def projected_dimension(mesh, dx, dy):
     """Dimension of the surface's x-y projection (depth axis z collapsed).
 
