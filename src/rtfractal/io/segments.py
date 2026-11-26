@@ -34,7 +34,7 @@ def read_columns(path):
     Raises ValueError naming the first offending line if the columns are
     ragged or a value will not parse."""
     rows, ncol, skipped_header = [], None, False
-    with open(path) as fh:
+    with open(path, encoding='utf-8') as fh:
         for lineno, line in enumerate(fh, 1):
             s = line.strip()
             if not rows and s.startswith('ITEM: '):

@@ -41,7 +41,7 @@ def _header_end(text):
 def read_points_nodes(case):
     """Unique sorted x and y node coordinates from constant/polyMesh/points."""
     path = os.path.join(case, 'constant', 'polyMesh', 'points')
-    with open(path) as fh:
+    with open(path, encoding='utf-8') as fh:
         text = fh.read()
     body = text[_header_end(text):]
     body = re.sub(r'//[^\n]*', '', body)
@@ -53,8 +53,24 @@ def read_points_nodes(case):
 
 
 def read_scalar_field(path, n_expected=None):
-    """internalField of a volScalarField (nonuniform list or uniform value)."""
-    with open(path) as fh:
+    """internalField of a volScalarField (nonuniform list or uniform value).
+
+    ASCII `writeFormat` only.  A field written with `format binary;` raises
+    NotImplementedError naming the file, because the alternative is a
+    UnicodeDecodeError several frames deep that reads like a corrupt file
+    rather than an unsupported one.  That cost real time once: the Cao A = 0
+    runs write binary fields, and the first diagnosis was that the files were
+    damaged.  Rewrite the case with `writeFormat ascii` in controlDict, or run
+    `foamFormatConvert`, if the field route is needed on such a case.
+    """
+    with open(path, 'rb') as fh:
+        head = fh.read(2048)
+    if re.search(rb'format\s+binary\s*;', head):
+        raise NotImplementedError(
+            '%s is written in OpenFOAM binary format, which this reader does not '
+            'parse; convert the case with foamFormatConvert or set '
+            'writeFormat ascii' % path)
+    with open(path, encoding='utf-8') as fh:
         text = fh.read()
     m = re.search(r'internalField\s+nonuniform\s+List<scalar>\s*(\d+)', text)
     if m:
@@ -71,7 +87,7 @@ def read_scalar_field(path, n_expected=None):
 
 def read_vector_field(path, n_expected=None):
     """internalField of a volVectorField as an (n, 3) array."""
-    with open(path) as fh:
+    with open(path, encoding='utf-8') as fh:
         text = fh.read()
     m = re.search(r'internalField\s+nonuniform\s+List<vector>\s*(\d+)', text)
     if m:
@@ -90,7 +106,7 @@ def read_blockmesh(case):
     """(nx, ny, nz, bounds) from a single-block system/blockMeshDict, where
     bounds = (x_min, x_max, y_min, y_max, z_min, z_max)."""
     path = os.path.join(case, 'system', 'blockMeshDict')
-    with open(path) as fh:
+    with open(path, encoding='utf-8') as fh:
         content = fh.read()
     vm = re.search(r'vertices\s*\(\s*([\s\S]*?)\s*\)\s*;', content)
     bm = re.search(r'hex\s*\([^)]+\)\s*\((\d+)\s+(\d+)\s+(\d+)\)', content)
@@ -111,7 +127,7 @@ def read_fluid_properties(case):
         p = os.path.join(case, 'constant', f'physicalProperties.{name}')
         if not os.path.isfile(p):
             continue
-        with open(p) as fh:
+        with open(p, encoding='utf-8') as fh:
             content = fh.read()
         m_rho = re.search(r'rho\s+([\d.eE+-]+)', content)
         m_nu = re.search(r'nu\s+([\d.eE+-]+)', content)
@@ -124,7 +140,7 @@ def read_fluid_properties(case):
     g = 9.81
     p = os.path.join(case, 'constant', 'g')
     if os.path.isfile(p):
-        with open(p) as fh:
+        with open(p, encoding='utf-8') as fh:
             m = re.search(r'value\s*\(\s*([\d.eE+-]+)\s+([\d.eE+-]+)\s+([\d.eE+-]+)\s*\)', fh.read())
         if m:
             g = abs(float(m.group(2)))

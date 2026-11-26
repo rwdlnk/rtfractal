@@ -133,7 +133,7 @@ def _read_frame(fh, path):
 
 def read_frames(path):
     """Iterate over every frame in a dump file."""
-    with open(path) as fh:
+    with open(path, encoding='utf-8') as fh:
         while True:
             frame = _read_frame(fh, path)
             if frame is None:

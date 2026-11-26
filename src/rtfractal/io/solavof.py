@@ -29,7 +29,7 @@ def read_vtk(path, fields=None):
     """Rectilinear-grid VTK -> dict(x, y, f[, P, U, V]) on cell centres, arrays
     shaped (nx, ny) with x[:, j] constant in j (legacy layout).  `fields`
     limits which SCALARS are parsed (e.g. ('F',)); default all."""
-    with open(path) as fh:
+    with open(path, encoding='utf-8') as fh:
         text = fh.read()
 
     def block(start, count):
@@ -74,7 +74,7 @@ def find_input_file(case):
 
 def parse_input(path):
     """Parse a SOLA-VOF int*.in file into a dict (upper-case keys)."""
-    with open(path) as fh:
+    with open(path, encoding='utf-8') as fh:
         lines = fh.readlines()
     p = {'_filepath': path}
     i = 0

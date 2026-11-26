@@ -54,7 +54,7 @@ import numpy as np
 from . import fractal, interface
 
 __all__ = ['GRID_ALIGNED', 'is_exact', 'inscribed_chord', 'plane_section', 'slice_dimension',
-           'slice_sweep']
+           'slice_sweep', 'surface_plane_section', 'surface_slice_dimension']
 
 # Angles at which a vertical plane lies on grid lines and needs no
 # interpolation: theta = 0 is a plane of constant z, theta = 90 one of
@@ -236,3 +236,130 @@ def slice_sweep(alpha, grid, thetas=(0.0, 90.0), n_offsets=9, margin=0.5,
         for p in offs:
             rows.append(slice_dimension(alpha, grid, th, float(p), chord, **kw))
     return rows
+
+
+# ---------------------------------------------------------------------------
+# Sections of an EXTRACTED SURFACE rather than of the field.
+#
+# Everything above cuts the volume-fraction field and re-contours it inside the
+# plane.  These two cut the triangulated iso-surface the solver wrote out, and
+# they exist because the codimension test must not mix the two
+# representations: `fractal.dimension_3d` counts that same triangulated
+# surface, so a section to difference against it has to come off the surface
+# too.  `interface`'s module docstring has the measurements -- field sections
+# read 0.061 higher on average, and the test holds on the surface throughout
+# (0.998 +/- 0.016 over six cases) while it fails on the field throughout
+# (1.100).
+#
+# The intersection is computed directly from the triangles, not through vtk,
+# because vtk is an optional dependency here and a plane-triangle crossing is
+# four lines of arithmetic.  A triangle whose three signed vertex distances to
+# the plane are not all of one sign is crossed, and the two edges carrying the
+# sign change give the end points of its segment.
+#
+# ONE CONVENTION TO KNOW: `plane_section` above places the box centre at
+# 0.5 * nx * dx, ignoring `grid.x_min`, because it indexes the field array.
+# These functions work in the mesh's own physical coordinates and so add the
+# grid minima.  The two agree whenever the grid origin is zero, which is every
+# case in these papers, and differ by the origin otherwise.  Pass the same
+# (theta_deg, offset) to both and the planes coincide.
+
+
+def surface_plane_section(mesh, grid, theta_deg, offset, chord=None):
+    """Segments where a vertical plane cuts a triangulated surface.
+
+    `mesh` is an `io.mesh.TriangleMesh`, `grid` its `Grid3D`.  The plane
+    contains the vertical and the horizontal direction at azimuth `theta_deg`
+    from +x, and sits at signed distance `offset` from the horizontal centre
+    along its own normal, matching `plane_section`.
+
+    Returns (segs, extent): `segs` is (n, 4) float64 of (s1, y1, s2, y2) with
+    `s` the in-plane horizontal coordinate and `y` the vertical, ready for
+    `fractal.dimension_of_segments`; `extent` is the horizontal extent the
+    ladder should be built on.
+    """
+    import numpy as _np
+    th = _np.radians(float(theta_deg) % 180.0)
+    c, sn = _np.cos(th), _np.sin(th)
+    u = _np.array([c, 0.0, sn])            # in-plane horizontal
+    n = _np.array([-sn, 0.0, c])           # plane normal
+    cx = grid.x_min + 0.5 * grid.nx * grid.dx
+    cz = grid.z_min + 0.5 * grid.nz * grid.dz
+    p0 = _np.array([cx, 0.0, cz]) + float(offset) * n
+
+    tv = mesh.triangle_vertices()                       # (M, 3, 3)
+    d = _np.einsum('mkj,j->mk', tv - p0, n)             # signed distances
+    # A vertex exactly on the plane is counted as positive, so a triangle that
+    # merely touches the plane at a vertex is not crossed while one straddling
+    # it through a vertex still yields two crossings (one of them the vertex
+    # itself, at t = 0).  A strict `(da * db) < 0` test instead drops both,
+    # which silently empties any plane that coincides with the mesh: every
+    # iso-surface vertex sits on a cell edge, so the centre plane of a
+    # cell-aligned grid is exactly such a plane, and it returned no section at
+    # all until this was fixed.
+    pos = d >= 0.0
+    crossed = pos.any(axis=1) & (~pos).any(axis=1)
+    tv, d, pos = tv[crossed], d[crossed], pos[crossed]
+    if len(tv) == 0:
+        segs = _np.empty((0, 4))
+    else:
+        pts = []
+        for a, b in ((0, 1), (1, 2), (2, 0)):
+            da, db = d[:, a], d[:, b]
+            hit = pos[:, a] != pos[:, b]
+            den = da - db
+            t = _np.where(hit, da / _np.where(den == 0.0, 1.0, den), 0.0)
+            pts.append((hit, tv[:, a] + t[:, None] * (tv[:, b] - tv[:, a])))
+        # every crossed triangle contributes exactly two edge crossings
+        out = _np.full((len(tv), 2, 3), _np.nan)
+        slot = _np.zeros(len(tv), dtype=int)
+        for hit, pt in pts:
+            idx = _np.flatnonzero(hit)
+            out[idx, slot[idx]] = pt[idx]
+            slot[idx] += 1
+        ok = slot == 2
+        out = out[ok]
+        s_coord = _np.einsum('mkj,j->mk', out, u)
+        y_coord = out[:, :, 1]
+        segs = _np.ascontiguousarray(
+            _np.column_stack([s_coord[:, 0], y_coord[:, 0], s_coord[:, 1], y_coord[:, 1]]),
+            dtype=_np.float64)
+
+    if chord is not None:
+        extent = float(chord)
+    elif float(theta_deg) % 180.0 == 0.0:
+        extent = (grid.nx - 1) * grid.dx
+    elif float(theta_deg) % 180.0 == 90.0:
+        extent = (grid.nz - 1) * grid.dz
+    else:
+        extent = inscribed_chord(grid, 1)[0]
+    return segs, extent
+
+
+def surface_slice_dimension(mesh, grid, theta_deg, offset, chord=None, max_box=None,
+                            min_box=None, factor=1.5, backend=None, offsets='covering',
+                            trim='r2'):
+    """Box-counting dimension of ONE plane section of a triangulated surface.
+
+    The surface-representation counterpart of `slice_dimension`, with the same
+    defaults (covering offsets, largest box one eighth of the section's
+    horizontal extent, smallest twice the mesh spacing, R^2 end-point trim), so
+    a codimension taken against `fractal.dimension_3d` on the same mesh crosses
+    nothing.
+    """
+    import numpy as _np
+    from . import fractal
+    segs, extent = surface_plane_section(mesh, grid, theta_deg, offset, chord)
+    if max_box is None:
+        max_box = extent / 8.0
+    if min_box is None:
+        min_box = 2.0 * min(grid.dx, grid.dz)
+    if len(segs) == 0:
+        return dict(theta=float(theta_deg), offset=float(offset), n_segments=0,
+                    dimension=_np.nan, error=_np.nan, r_squared=_np.nan,
+                    max_box=max_box, min_box=min_box, extent=extent)
+    r = fractal.dimension_of_segments(segs, min_box, max_box, factor, backend, offsets, trim)
+    return dict(theta=float(theta_deg), offset=float(offset), n_segments=len(segs),
+                dimension=float(r['dimension']), error=float(r['error']),
+                r_squared=float(r['r_squared']),
+                max_box=max_box, min_box=min_box, extent=extent)

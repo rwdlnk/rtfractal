@@ -110,7 +110,7 @@ def _read_legacy_ascii(path):
         head = fh.read(256)
     if b'ASCII' not in head.split(b'\n', 3)[2].upper():
         return None
-    with open(path) as fh:
+    with open(path, encoding='utf-8') as fh:
         text = fh.read()
     i = text.index('POINTS')
     eol = text.index('\n', i)
